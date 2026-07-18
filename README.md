@@ -31,4 +31,8 @@ Flycast's compile-time debug logger is disabled. Its high-frequency CPU and
 GD-ROM trace stream can otherwise write more than a megabyte per second to the
 SD card and cause audio underruns that do not occur in a release build.
 
+The temporary device probe accepts comma-separated Flycast virtual config
+values from `probe-overrides.txt` in the probe root. This keeps tuning arms
+isolated from both the packaged defaults and durable user configuration.
+
 No BIOS or game content is included.

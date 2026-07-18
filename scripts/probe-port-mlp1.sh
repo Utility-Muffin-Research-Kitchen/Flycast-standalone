@@ -40,10 +40,17 @@ export USERDATA_PATH="$PROBE_ROOT/userdata"
 export LOGS_PATH="$PROBE_ROOT/logs"
 export UMRK_RUNTIME_PATH="$PROBE_ROOT/runtime"
 
+override_file="$PROBE_ROOT/probe-overrides.txt"
+if [ -f "$override_file" ]; then
+    IFS= read -r FLYCAST_CONFIG_OVERRIDES <"$override_file" || true
+    export FLYCAST_CONFIG_OVERRIDES
+fi
+
 if [ "${FLYCAST_PROBE_PREFLIGHT:-0}" = "1" ]; then
     test -x "$PROBE_ROOT/bin/flycast"
     test -x "$PROBE_ROOT/launch.sh"
-    printf 'probe_root=%s\nrom=%s\n' "$PROBE_ROOT" "$ROM_PATH"
+    printf 'probe_root=%s\nrom=%s\noverrides=%s\n' \
+        "$PROBE_ROOT" "$ROM_PATH" "${FLYCAST_CONFIG_OVERRIDES:-none}"
     exit 0
 fi
 

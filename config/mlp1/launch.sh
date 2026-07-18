@@ -64,6 +64,9 @@ config_override="config:rend.ShowFPS=no"
 if [ "${FLYCAST_PROBE:-0}" = "1" ]; then
     config_override="config:rend.ShowFPS=yes"
 fi
+if [ -n "${FLYCAST_CONFIG_OVERRIDES:-}" ]; then
+    config_override="$config_override,$FLYCAST_CONFIG_OVERRIDES"
+fi
 
 cd "$ROOT_DIR"
 : >"$LOG_FILE"
