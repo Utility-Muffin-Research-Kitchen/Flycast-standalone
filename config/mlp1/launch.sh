@@ -66,6 +66,7 @@ if [ "${FLYCAST_PROBE:-0}" = "1" ]; then
 fi
 
 cd "$ROOT_DIR"
+: >"$LOG_FILE"
 exec "$ROOT_DIR/bin/flycast" \
     -config "$config_override" \
     "$ROM_PATH" >>"$LOG_FILE" 2>&1

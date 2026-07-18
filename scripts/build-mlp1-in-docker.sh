@@ -15,6 +15,8 @@ fi
 
 mkdir -p "$BUILD_DIR" "$ARTIFACT_DIR/bin" "$ARTIFACT_DIR/provenance"
 
+# Flycast's ENABLE_LOG emits high-frequency SH4/REIOS debug events. On the
+# MLP1, redirecting that stream to the SD card is enough to disrupt audio.
 cmake -S "$SOURCE_DIR" -B "$BUILD_DIR" --fresh \
     -DCMAKE_TOOLCHAIN_FILE="$CMAKE_TOOLCHAIN_FILE" \
     -DCMAKE_BUILD_TYPE=Release \
@@ -24,7 +26,7 @@ cmake -S "$SOURCE_DIR" -B "$BUILD_DIR" --fresh \
     -DLIBRETRO=OFF \
     -DENABLE_CTEST=OFF \
     -DTEST_AUTOMATION=OFF \
-    -DENABLE_LOG=ON \
+    -DENABLE_LOG=OFF \
     -DUSE_GLES=ON \
     -DUSE_GLES2=OFF \
     -DUSE_OPENGL=ON \

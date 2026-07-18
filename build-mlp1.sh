@@ -52,6 +52,7 @@ cat >"$ARTIFACT_DIR/build-manifest.json" <<EOF
   "build_profile": "$MLP1_BUILD_PROFILE",
   "frontend": "standalone-sdl2",
   "renderer": "opengles",
+  "debug_logging": false,
   "host_sdl": true,
   "vulkan": false,
   "binary": "bin/flycast",

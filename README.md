@@ -27,4 +27,8 @@ native 480p GLES, MLP1 rotation, threaded rendering, per-strip sorting, AICA
 DSP disabled, and adaptive GPU frame skipping. It deliberately keeps fixed
 frame skipping disabled.
 
+Flycast's compile-time debug logger is disabled. Its high-frequency CPU and
+GD-ROM trace stream can otherwise write more than a megabyte per second to the
+SD card and cause audio underruns that do not occur in a release build.
+
 No BIOS or game content is included.
