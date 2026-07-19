@@ -23,6 +23,7 @@ for path in \
     "$PACKAGE_DIR/provenance/build-manifest.json" \
     "$PACKAGE_DIR/provenance/build-flags.env" \
     "$PACKAGE_DIR/provenance/elf-dynamic.txt" \
+    "$PACKAGE_DIR/provenance/patches.sha256" \
     "$PACKAGE_DIR/provenance/submodules.txt" \
     "$MANIFEST"; do
     if [ ! -f "$path" ]; then

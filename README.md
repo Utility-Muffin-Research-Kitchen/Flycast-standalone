@@ -27,6 +27,12 @@ native 480p GLES, MLP1 rotation, threaded rendering, per-strip sorting, AICA
 DSP disabled, and adaptive GPU frame skipping. It deliberately keeps fixed
 frame skipping disabled.
 
+The MLP1 build carries one narrow upstream patch: when
+`FLYCAST_UI_ROTATE_90=1`, Flycast lays out its ImGui UI in landscape and rotates
+those UI vertices to the portrait-mounted KMS framebuffer. Gameplay continues
+to use Flycast's existing `rend.Rotate90` renderer path, so opening the native
+menu does not add a full-frame rotation copy to normal emulation.
+
 Flycast's compile-time debug logger is disabled. Its high-frequency CPU and
 GD-ROM trace stream can otherwise write more than a megabyte per second to the
 SD card and cause audio underruns that do not occur in a release build.

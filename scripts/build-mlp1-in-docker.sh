@@ -49,6 +49,13 @@ install -m 0755 "$BUILD_DIR/flycast" "$ARTIFACT_DIR/bin/flycast"
 cmake -LAH -N "$BUILD_DIR" >"$ARTIFACT_DIR/provenance/cmake-cache.txt"
 git -C "$SOURCE_DIR" submodule status --recursive \
     >"$ARTIFACT_DIR/provenance/submodules.txt"
+find /build/patches -maxdepth 1 -type f -name '*.patch' -print0 |
+    LC_ALL=C sort -z |
+    while IFS= read -r -d '' patch; do
+        printf '%s  %s\n' \
+            "$(sha256sum "$patch" | awk '{print $1}')" \
+            "${patch#/build/}"
+    done >"$ARTIFACT_DIR/provenance/patches.sha256"
 "$CC" --version >"$ARTIFACT_DIR/provenance/cc-version.txt"
 "$CXX" --version >"$ARTIFACT_DIR/provenance/cxx-version.txt"
 cmake --version >"$ARTIFACT_DIR/provenance/cmake-version.txt"

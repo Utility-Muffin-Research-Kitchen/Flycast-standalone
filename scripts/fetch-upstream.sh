@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_DIR="${FLYCAST_SOURCE_DIR:-$ROOT_DIR/workdir/mlp1/flycast}"
+PATCH_DIR="$ROOT_DIR/patches"
 
 # shellcheck source=../upstream.env
 . "$ROOT_DIR/upstream.env"
@@ -30,10 +31,25 @@ if [ ! -f "$SOURCE_DIR/CMakeLists.txt" ]; then
     git -C "$SOURCE_DIR" checkout --detach "$FLYCAST_UPSTREAM_SHA"
 fi
 
+PATCHES=()
+while IFS= read -r patch; do
+    PATCHES[${#PATCHES[@]}]="$patch"
+done < <(find "$PATCH_DIR" -maxdepth 1 -type f -name '*.patch' | LC_ALL=C sort)
+
+# A previous successful build leaves the deterministic MLP1 patch set applied.
+# Reverse only that exact set before checking for unrelated source edits.
 if [ -n "$(git -C "$SOURCE_DIR" status --short --untracked-files=no)" ]; then
-    echo "Flycast source checkout has tracked changes: $SOURCE_DIR" >&2
-    echo "Refusing to overwrite an edited source tree." >&2
-    exit 1
+    for ((index=${#PATCHES[@]} - 1; index >= 0; index--)); do
+        patch="${PATCHES[$index]}"
+        if git -C "$SOURCE_DIR" apply --reverse --check "$patch" >/dev/null 2>&1; then
+            git -C "$SOURCE_DIR" apply --reverse "$patch"
+        fi
+    done
+    if [ -n "$(git -C "$SOURCE_DIR" status --short --untracked-files=no)" ]; then
+        echo "Flycast source checkout has non-package changes: $SOURCE_DIR" >&2
+        echo "Refusing to overwrite an edited source tree." >&2
+        exit 1
+    fi
 fi
 
 git -C "$SOURCE_DIR" checkout --detach "$FLYCAST_UPSTREAM_SHA"
@@ -46,5 +62,11 @@ if [ "$actual_sha" != "$FLYCAST_UPSTREAM_SHA" ]; then
     exit 1
 fi
 
-printf 'Flycast source ready: %s (%s)\n' \
-    "$FLYCAST_UPSTREAM_TAG" "$actual_sha"
+for patch in "${PATCHES[@]}"; do
+    git -C "$SOURCE_DIR" apply --check "$patch"
+    git -C "$SOURCE_DIR" apply "$patch"
+done
+
+printf 'Flycast source ready: %s (%s, %s MLP1 patch%s)\n' \
+    "$FLYCAST_UPSTREAM_TAG" "$actual_sha" "${#PATCHES[@]}" \
+    "$([ "${#PATCHES[@]}" -eq 1 ] || printf 'es')"

@@ -1,0 +1,72 @@
+diff --git a/core/rend/gles/opengl_driver.cpp b/core/rend/gles/opengl_driver.cpp
+index 001999cc..ac26866f 100644
+--- a/core/rend/gles/opengl_driver.cpp
++++ b/core/rend/gles/opengl_driver.cpp
+@@ -64,6 +64,35 @@ void OpenGLDriver::renderDrawData(ImDrawData* drawData, bool gui_open)
+ 		if (renderer != nullptr)
+ 			renderer->RenderLastFrame();
+ 	}
++	if (getenv("FLYCAST_UI_ROTATE_90") != nullptr)
++	{
++		const float logicalWidth = drawData->DisplaySize.x;
++		const ImVec2 displayPos = drawData->DisplayPos;
++		for (int listIndex = 0; listIndex < drawData->CmdListsCount; listIndex++)
++		{
++			ImDrawList *drawList = drawData->CmdLists[listIndex];
++			for (int vertexIndex = 0; vertexIndex < drawList->VtxBuffer.Size; vertexIndex++)
++			{
++				ImVec2& pos = drawList->VtxBuffer[vertexIndex].pos;
++				const float x = pos.x - displayPos.x;
++				const float y = pos.y - displayPos.y;
++				pos.x = y;
++				pos.y = logicalWidth - x;
++			}
++			for (int commandIndex = 0; commandIndex < drawList->CmdBuffer.Size; commandIndex++)
++			{
++				ImVec4& clip = drawList->CmdBuffer[commandIndex].ClipRect;
++				const float x1 = clip.x - displayPos.x;
++				const float y1 = clip.y - displayPos.y;
++				const float x2 = clip.z - displayPos.x;
++				const float y2 = clip.w - displayPos.y;
++				clip = ImVec4(y1, logicalWidth - x2,
++				              y2, logicalWidth - x1);
++			}
++		}
++		drawData->DisplayPos = ImVec2(0.f, 0.f);
++		drawData->DisplaySize = ImVec2(drawData->DisplaySize.y, logicalWidth);
++	}
+ 	ImGui_ImplOpenGL3_RenderDrawData(drawData);
+ 	if (gui_open)
+ 		frameRendered = true;
+diff --git a/core/ui/gui.cpp b/core/ui/gui.cpp
+index 739c956b..80f41a06 100644
+--- a/core/ui/gui.cpp
++++ b/core/ui/gui.cpp
+@@ -402,15 +402,23 @@ void gui_set_mouse_wheel(float delta) {
+ static void gui_newFrame()
+ {
+ 	imguiDriver->newFrame();
+-	ImGui::GetIO().DisplaySize.x = settings.display.width;
+-	ImGui::GetIO().DisplaySize.y = settings.display.height;
++	const bool rotateUi90 = getenv("FLYCAST_UI_ROTATE_90") != nullptr;
++	ImGui::GetIO().DisplaySize.x = rotateUi90
++		? settings.display.height
++		: settings.display.width;
++	ImGui::GetIO().DisplaySize.y = rotateUi90
++		? settings.display.width
++		: settings.display.height;
+ 
+ 	ImGuiIO& io = ImGui::GetIO();
+ 
+-	if (mouseX < 0 || mouseX >= settings.display.width || mouseY < 0 || mouseY >= settings.display.height)
++	const int uiMouseX = rotateUi90 ? settings.display.height - mouseY : mouseX;
++	const int uiMouseY = rotateUi90 ? mouseX : mouseY;
++	if (uiMouseX < 0 || uiMouseX >= io.DisplaySize.x ||
++		uiMouseY < 0 || uiMouseY >= io.DisplaySize.y)
+ 		io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+ 	else
+-		io.AddMousePosEvent(mouseX, mouseY);
++		io.AddMousePosEvent(uiMouseX, uiMouseY);
+ 	static bool delayTouch;
+ #if defined(__ANDROID__) || defined(TARGET_IPHONE) || defined(__SWITCH__)
+ 	// Delay touch by one frame to allow widgets to be hovered before click

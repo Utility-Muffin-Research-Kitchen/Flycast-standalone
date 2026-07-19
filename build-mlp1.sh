@@ -75,6 +75,7 @@ cat >"$ARTIFACT_DIR/build-manifest.json" <<EOF
   "binary": "bin/flycast",
   "binary_sha256": "$binary_sha",
   "dynamic_dependencies": [$dynamic_dependencies],
+  "patches_inventory": "provenance/patches.sha256",
   "submodules_inventory": "provenance/submodules.txt",
   "build_flags_inventory": "provenance/build-flags.env",
   "elf_dependencies_inventory": "provenance/elf-dynamic.txt"

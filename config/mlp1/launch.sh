@@ -50,6 +50,7 @@ LOG_FILE="$LOG_DIR/flycast.log"
 RUNTIME_DIR="$UMRK_RUNTIME_PATH/flycast"
 DEFAULTS_VERSION_FILE="$ROOT_DIR/defaults/config.version"
 INSTALLED_VERSION_FILE="$CONFIG_DIR/.umrk-defaults-version"
+LEGACY_V1_MAPPING_SHA256="f3ccd1c95c184463964299cc2803b3b8455d7a706b42492bb0a747747ad01e6f"
 
 if [ ! -f "$DEFAULTS_VERSION_FILE" ]; then
     echo "Flycast package is missing defaults/config.version" >&2
@@ -68,15 +69,35 @@ mkdir -p "$CONFIG_DIR/mappings" "$DATA_DIR" "$CACHE_HOME" "$HOME_DIR" \
 
 if [ ! -f "$CONFIG_DIR/emu.cfg" ]; then
     cp "$ROOT_DIR/defaults/emu.cfg" "$CONFIG_DIR/emu.cfg"
-    printf '%s\n' "$DEFAULTS_VERSION" >"$INSTALLED_VERSION_FILE"
-elif [ ! -f "$INSTALLED_VERSION_FILE" ]; then
-    # Version 1 has no destructive migration. Existing user choices are kept,
-    # while device/storage invariants below are applied as virtual options.
-    printf '%s\n' "$DEFAULTS_VERSION" >"$INSTALLED_VERSION_FILE"
 fi
 if [ ! -f "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" ]; then
     cp "$ROOT_DIR/defaults/SDL_Loong Gamepad.cfg" \
         "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
+fi
+
+INSTALLED_VERSION=0
+if [ -f "$INSTALLED_VERSION_FILE" ]; then
+    INSTALLED_VERSION="$(tr -d '[:space:]' <"$INSTALLED_VERSION_FILE")"
+    case "$INSTALLED_VERSION" in
+        ''|*[!0-9]*)
+            echo "invalid installed Flycast defaults version: $INSTALLED_VERSION" >&2
+            exit 1
+            ;;
+    esac
+fi
+
+if [ "$INSTALLED_VERSION" -lt "$DEFAULTS_VERSION" ]; then
+    # Version 2 changes the MLP1 Menu binding from Flycast's Exit action to its
+    # native menu. Replace only the byte-identical version-1 mapping so user
+    # controller customizations remain untouched.
+    if [ "$INSTALLED_VERSION" -lt 2 ]; then
+        mapping_file="$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
+        mapping_sha="$(sha256sum "$mapping_file" | awk '{print $1}')"
+        if [ "$mapping_sha" = "$LEGACY_V1_MAPPING_SHA256" ]; then
+            cp "$ROOT_DIR/defaults/SDL_Loong Gamepad.cfg" "$mapping_file"
+        fi
+    fi
+    printf '%s\n' "$DEFAULTS_VERSION" >"$INSTALLED_VERSION_FILE"
 fi
 
 export HOME="$HOME_DIR"
@@ -90,6 +111,7 @@ export SDL_VIDEODRIVER=kmsdrm
 export SDL_KMSDRM_REQUIRE_DRM_MASTER=1
 export SDL_AUDIODRIVER=pulseaudio
 export PULSE_SERVER="${PULSE_SERVER:-unix:/tmp/pulse-socket}"
+export FLYCAST_UI_ROTATE_90=1
 
 validate_virtual_path() {
     case "$2" in
@@ -131,6 +153,29 @@ append_override "config:Dreamcast.SavestatePath=$STATE_SAVE_ROOT"
 append_override "config:Dreamcast.MappingsPath=$CONFIG_DIR/mappings"
 append_override "config:Dreamcast.CheatPath=$CHEATS_PATH"
 append_override "config:rend.ShowFPS=no"
+
+# Jawaka keeps the physical Loong Gamepad grabbed while standalone emulators
+# use its calibrated uinput clone. Flycast still enumerates both devices, so
+# explicitly detach the silent physical entries and assign the published
+# virtual joystick to Dreamcast port 0.
+if [ -n "${JAWAKA_RETROARCH_JOYPAD_INDEX:-}" ]; then
+    case "$JAWAKA_RETROARCH_JOYPAD_INDEX" in
+        *[!0-9]*)
+            echo "invalid Jawaka virtual joypad index: $JAWAKA_RETROARCH_JOYPAD_INDEX" >&2
+            exit 1
+            ;;
+    esac
+    if [ "$JAWAKA_RETROARCH_JOYPAD_INDEX" -gt 15 ]; then
+        echo "Jawaka virtual joypad index is out of range: $JAWAKA_RETROARCH_JOYPAD_INDEX" >&2
+        exit 1
+    fi
+    joystick_index=0
+    while [ "$joystick_index" -lt "$JAWAKA_RETROARCH_JOYPAD_INDEX" ]; do
+        append_override "input:maple_sdl_joystick_${joystick_index}=-1"
+        joystick_index=$((joystick_index + 1))
+    done
+    append_override "input:maple_sdl_joystick_${JAWAKA_RETROARCH_JOYPAD_INDEX}=0"
+fi
 
 if [ "${FLYCAST_PROBE:-0}" = "1" ]; then
     append_override "config:rend.ShowFPS=yes"

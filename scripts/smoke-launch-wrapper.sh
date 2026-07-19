@@ -31,7 +31,8 @@ cat >"$PACKAGE_DIR/bin/flycast" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 for name in HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME \
-    XDG_RUNTIME_DIR TMPDIR SDL_VIDEODRIVER SDL_AUDIODRIVER PULSE_SERVER; do
+    XDG_RUNTIME_DIR TMPDIR SDL_VIDEODRIVER SDL_AUDIODRIVER PULSE_SERVER \
+    FLYCAST_UI_ROTATE_90; do
     printf '%s=<%s>\n' "$name" "${!name-}"
 done
 index=0
@@ -53,6 +54,7 @@ run_wrapper() {
         CHEATS_PATH="$CHEATS_PATH_TEST" \
         LOGS_PATH="$LOGS_PATH_TEST" \
         UMRK_RUNTIME_PATH="$RUNTIME_PATH_TEST" \
+        JAWAKA_RETROARCH_JOYPAD_INDEX=1 \
         FLYCAST_CONFIG_OVERRIDES='config:pvr.AutoSkipFrame=2' \
         "$PACKAGE_DIR/launch.sh" "$ROM_PATH"
 }
@@ -77,13 +79,27 @@ grep -F "XDG_DATA_HOME=<$SAVES_PATH_TEST/Flycast/xdg>" "$LOG_FILE" >/dev/null
 grep -F "XDG_RUNTIME_DIR=<$RUNTIME_PATH_TEST/flycast>" "$LOG_FILE" >/dev/null
 grep -F 'SDL_VIDEODRIVER=<kmsdrm>' "$LOG_FILE" >/dev/null
 grep -F 'SDL_AUDIODRIVER=<pulseaudio>' "$LOG_FILE" >/dev/null
+grep -F 'FLYCAST_UI_ROTATE_90=<1>' "$LOG_FILE" >/dev/null
 grep -F 'arg_0=<-config>' "$LOG_FILE" >/dev/null
 grep -F "config:Dreamcast.BiosPath=$BIOS_PATH_TEST" "$LOG_FILE" >/dev/null
 grep -F "config:Dreamcast.VMUPath=$SAVES_PATH_TEST/Flycast" "$LOG_FILE" >/dev/null
 grep -F "config:Dreamcast.SavestatePath=$STATES_PATH_TEST/Flycast" "$LOG_FILE" >/dev/null
+grep -F 'input:maple_sdl_joystick_0=-1' "$LOG_FILE" >/dev/null
+grep -F 'input:maple_sdl_joystick_1=0' "$LOG_FILE" >/dev/null
 grep -F 'config:pvr.rend=0' "$LOG_FILE" >/dev/null
 grep -F 'config:pvr.AutoSkipFrame=2' "$LOG_FILE" >/dev/null
 grep -F "arg_2=<$ROM_PATH>" "$LOG_FILE" >/dev/null
+
+# Recreate the shipped version-1 mapping and prove the version-2 launch
+# migrates its Menu button from Exit to Flycast's native menu.
+sed 's/10:btn_menu/10:btn_escape/' \
+    "$PACKAGE_DIR/defaults/SDL_Loong Gamepad.cfg" \
+    >"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
+printf '1\n' >"$CONFIG_DIR/.umrk-defaults-version"
+run_wrapper
+grep -F 'bind7 = 10:btn_menu' \
+    "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
+grep -Fx '2' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
 
 printf '\n[user]\ncustom = preserved\n' >>"$CONFIG_DIR/emu.cfg"
 printf '\n# user mapping edit\n' >>"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
