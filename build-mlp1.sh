@@ -32,6 +32,22 @@ mkdir -p "$BUILD_DIR" "$ARTIFACT_DIR"
 image_id="$("$DOCKER" image inspect "$TOOLCHAIN_IMAGE" --format '{{.Id}}')"
 binary_sha="$(shasum -a 256 "$ARTIFACT_DIR/bin/flycast" | awk '{print $1}')"
 source_sha="$(git -C "$SOURCE_DIR" rev-parse HEAD)"
+source_date_epoch="$(git -C "$SOURCE_DIR" show -s --format=%ct HEAD)"
+dynamic_dependencies="$(
+    awk -F'[][]' '
+        /Shared library:/ {
+            if (count++ > 0) {
+                printf ", "
+            }
+            printf "\"%s\"", $2
+        }
+        END {
+            if (count == 0) {
+                printf ""
+            }
+        }
+    ' "$ARTIFACT_DIR/provenance/elf-dynamic.txt"
+)"
 
 # shellcheck source=upstream.env
 . "$ROOT_DIR/upstream.env"
@@ -45,6 +61,7 @@ cat >"$ARTIFACT_DIR/build-manifest.json" <<EOF
   "upstream_url": "$FLYCAST_UPSTREAM_URL",
   "upstream_tag": "$FLYCAST_UPSTREAM_TAG",
   "upstream_sha": "$source_sha",
+  "source_date_epoch": $source_date_epoch,
   "toolchain_image": "$TOOLCHAIN_IMAGE",
   "toolchain_image_id": "$image_id",
   "target_soc": "rk3566",
@@ -56,7 +73,11 @@ cat >"$ARTIFACT_DIR/build-manifest.json" <<EOF
   "host_sdl": true,
   "vulkan": false,
   "binary": "bin/flycast",
-  "binary_sha256": "$binary_sha"
+  "binary_sha256": "$binary_sha",
+  "dynamic_dependencies": [$dynamic_dependencies],
+  "submodules_inventory": "provenance/submodules.txt",
+  "build_flags_inventory": "provenance/build-flags.env",
+  "elf_dependencies_inventory": "provenance/elf-dynamic.txt"
 }
 EOF
 

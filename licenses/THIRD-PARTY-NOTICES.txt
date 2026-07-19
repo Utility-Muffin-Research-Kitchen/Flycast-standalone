@@ -1,0 +1,83 @@
+Flycast standalone for Leaf — third-party notices
+================================================
+
+Flycast incorporates third-party software. The package carries the upstream
+license files for the embedded components that provide them:
+
+- Google Breakpad (BSD 3-Clause)
+- DreamPicoPort API (MIT)
+- libusb (LGPL-2.1-or-later)
+- xxHash (BSD 2-Clause)
+- GLM (Happy Bunny License / MIT)
+- libchdr (BSD 3-Clause)
+- Zstandard (BSD 3-Clause)
+- libzip (BSD 3-Clause)
+- libjuice (MPL-2.0)
+- WebSocket++ (BSD 3-Clause)
+- picoTCP (GPL-2.0)
+- Boost.Nowide (Boost Software License 1.0)
+- rcheevos (MIT)
+- xBRZ (GPL-3.0)
+- miniupnpc (BSD 3-Clause)
+
+The source tree also embeds the following components whose notices are carried
+here because the Flycast snapshot does not contain a standalone license file:
+
+Dear ImGui
+----------
+
+Copyright (c) 2014-2025 Omar Cornut and contributors.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+nlohmann/json
+-------------
+
+Copyright (c) 2013-2022 Niels Lohmann.
+
+Licensed under the MIT License. The MIT grant and disclaimer above apply.
+
+stb_image and stb_image_write
+-----------------------------
+
+Copyright (c) 2017 Sean Barrett.
+
+Available under either the MIT License or the public-domain Unlicense. This
+distribution selects the MIT License; the MIT grant and disclaimer above
+apply.
+
+LZMA SDK
+--------
+
+The LZMA SDK files state that they are public domain.
+
+libelf
+------
+
+Copyright (c) 1999-2004 University of New South Wales.
+
+Licensed under the BSD 2-Clause license.
+
+System libraries
+----------------
+
+The MLP1 package does not redistribute the dynamically linked system copies of
+SDL2, ALSA, PulseAudio, libcurl, zlib, libstdc++, libgcc, glibc, or the stock
+Mali GLES driver. Their names are recorded in manifest.json and the ELF
+provenance inventory.

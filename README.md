@@ -35,4 +35,17 @@ The temporary device probe accepts comma-separated Flycast virtual config
 values from `probe-overrides.txt` in the probe root. This keeps tuning arms
 isolated from both the packaged defaults and durable user configuration.
 
+The production wrapper keeps configuration under `USERDATA_PATH`, but derives
+Dreamcast data/VMUs and save states from Jawaka's source-specific `SAVES_PATH`
+and `STATES_PATH`. It passes BIOS, storage, mapping, renderer, and orientation
+invariants through Flycast v2.6's native virtual-config options. The package
+manifest inventories and hashes every payload file.
+
+Useful narrow checks:
+
+```sh
+make smoke-launch-wrapper
+make verify-package-mlp1
+```
+
 No BIOS or game content is included.
