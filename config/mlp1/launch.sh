@@ -97,6 +97,30 @@ if [ "$INSTALLED_VERSION" -lt "$DEFAULTS_VERSION" ]; then
             cp "$ROOT_DIR/defaults/SDL_Loong Gamepad.cfg" "$mapping_file"
         fi
     fi
+    # Version 3 attaches the Jump Pack (Purupuru) to controller 1's second
+    # expansion slot so Dreamcast games can rumble; slot 1 keeps its VMU, which
+    # is how the hardware was normally used. emu.cfg is only seeded on a fresh
+    # install, so without this an existing install would never gain rumble.
+    #
+    # Unlike the v2 mapping migration this cannot checksum the file -- Flycast
+    # rewrites emu.cfg on exit, so it never matches a shipped hash. It therefore
+    # rewrites the slot only when it still holds the old default (a VMU), and
+    # cannot distinguish that from a user who deliberately chose a second VMU.
+    # Anyone who wants two back can set it in Flycast's own Controls settings.
+    if [ "$INSTALLED_VERSION" -lt 3 ] && [ -f "$CONFIG_DIR/emu.cfg" ]; then
+        if grep -q '^device1.2 = 1$' "$CONFIG_DIR/emu.cfg"; then
+            # Write-and-rename rather than sed -i: the in-place flag is not
+            # portable (BSD sed needs a suffix argument), and this wrapper is
+            # exercised on the host by the launch smoke test.
+            emu_cfg_new="$CONFIG_DIR/emu.cfg.umrk-new"
+            if sed 's/^device1.2 = 1$/device1.2 = 3/' \
+                    "$CONFIG_DIR/emu.cfg" >"$emu_cfg_new"; then
+                mv "$emu_cfg_new" "$CONFIG_DIR/emu.cfg"
+            else
+                rm -f "$emu_cfg_new"
+            fi
+        fi
+    fi
     printf '%s\n' "$DEFAULTS_VERSION" >"$INSTALLED_VERSION_FILE"
 fi
 
