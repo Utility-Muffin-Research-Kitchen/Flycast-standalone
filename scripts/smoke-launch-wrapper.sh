@@ -90,16 +90,20 @@ grep -F 'config:pvr.rend=0' "$LOG_FILE" >/dev/null
 grep -F 'config:pvr.AutoSkipFrame=2' "$LOG_FILE" >/dev/null
 grep -F "arg_2=<$ROM_PATH>" "$LOG_FILE" >/dev/null
 
-# Recreate the shipped version-1 mapping and prove the version-2 launch
-# migrates its Menu button from Exit to Flycast's native menu.
+# Recreate the shipped version-1 state and prove the migrations run: version 2
+# moves the Menu button from Exit to Flycast's native menu, version 3 attaches
+# the Jump Pack to controller 1's second expansion slot so games can rumble.
 sed 's/10:btn_menu/10:btn_escape/' \
     "$PACKAGE_DIR/defaults/SDL_Loong Gamepad.cfg" \
     >"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
+sed -i.bak 's/^device1.2 = 3$/device1.2 = 1/' "$CONFIG_DIR/emu.cfg"
+rm -f "$CONFIG_DIR/emu.cfg.bak"
 printf '1\n' >"$CONFIG_DIR/.umrk-defaults-version"
 run_wrapper
 grep -F 'bind7 = 10:btn_menu' \
     "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
-grep -Fx '2' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
+grep -Fx 'device1.2 = 3' "$CONFIG_DIR/emu.cfg" >/dev/null
+grep -Fx '3' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
 
 printf '\n[user]\ncustom = preserved\n' >>"$CONFIG_DIR/emu.cfg"
 printf '\n# user mapping edit\n' >>"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
