@@ -131,4 +131,63 @@ if "$PACKAGE_DIR/launch.sh" "$TMP_ROOT/missing.chd" >/dev/null 2>&1; then
     exit 1
 fi
 
+# A Jawaka launch publishes the frozen controller roster in player order, so
+# roster slot N must reach Dreamcast port N whatever the calibrated pad's index
+# is, and every slot past the roster must stay detached.
+run_wrapper_roster() {
+    env -u UMRK_ENV_FILE \
+        PLATFORM=mlp1 \
+        SDCARD_PATH="$SDCARD_PATH_TEST" \
+        USERDATA_PATH="$USERDATA_PATH_TEST" \
+        BIOS_PATH="$BIOS_PATH_TEST" \
+        SAVES_PATH="$SAVES_PATH_TEST" \
+        STATES_PATH="$STATES_PATH_TEST" \
+        CHEATS_PATH="$CHEATS_PATH_TEST" \
+        LOGS_PATH="$LOGS_PATH_TEST" \
+        UMRK_RUNTIME_PATH="$RUNTIME_PATH_TEST" \
+        JAWAKA_RETROARCH_JOYPAD_INDEX=1 \
+        SDL_JOYSTICK_DEVICE="$1" \
+        "$PACKAGE_DIR/launch.sh" "$ROM_PATH"
+}
+
+# Two controllers: wireless P1 then the calibrated virtual pad as P2.
+run_wrapper_roster '/dev/input/event6:/dev/input/event5'
+for expected in \
+    'input:maple_sdl_joystick_0=0' \
+    'input:maple_sdl_joystick_1=1' \
+    'input:maple_sdl_joystick_2=-1' \
+    'input:maple_sdl_joystick_3=-1'; do
+    if ! grep -F "$expected" "$LOG_FILE" >/dev/null; then
+        echo "two-controller roster did not produce $expected" >&2
+        exit 1
+    fi
+done
+if grep -F 'input:maple_sdl_joystick_1=0' "$LOG_FILE" >/dev/null; then
+    echo "roster launch still pinned the calibrated pad to port 0" >&2
+    exit 1
+fi
+
+# No wireless controller: the calibrated virtual pad is the only roster member
+# and owns port 0, with every other port left empty.
+run_wrapper_roster '/dev/input/event5'
+for expected in \
+    'input:maple_sdl_joystick_0=0' \
+    'input:maple_sdl_joystick_1=-1'; do
+    if ! grep -F "$expected" "$LOG_FILE" >/dev/null; then
+        echo "single-controller roster did not produce $expected" >&2
+        exit 1
+    fi
+done
+
+# A fourth external is dropped from the roster, so only four ports are bound.
+run_wrapper_roster '/dev/input/event6:/dev/input/event7:/dev/input/event8:/dev/input/event5'
+for expected in \
+    'input:maple_sdl_joystick_3=3' \
+    'input:maple_sdl_joystick_4=-1'; do
+    if ! grep -F "$expected" "$LOG_FILE" >/dev/null; then
+        echo "four-controller roster did not produce $expected" >&2
+        exit 1
+    fi
+done
+
 printf 'Verified launch wrapper paths, quoting, seed policy, and user-config preservation\n'

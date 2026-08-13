@@ -178,11 +178,45 @@ append_override "config:Dreamcast.MappingsPath=$CONFIG_DIR/mappings"
 append_override "config:Dreamcast.CheatPath=$CHEATS_PATH"
 append_override "config:rend.ShowFPS=no"
 
-# Jawaka keeps the physical Loong Gamepad grabbed while standalone emulators
-# use its calibrated uinput clone. Flycast still enumerates both devices, so
-# explicitly detach the silent physical entries and assign the published
-# virtual joystick to Dreamcast port 0.
-if [ -n "${JAWAKA_RETROARCH_JOYPAD_INDEX:-}" ]; then
+# Jawaka freezes a controller roster for each launch and exports it in
+# SDL_JOYSTICK_DEVICE as colon-separated event paths in player order --
+# wireless pads first, the calibrated virtual Loong last -- backed by a private
+# /dev/input holding exactly those devices. Roster slot N is SDL joystick N, so
+# bind them straight through to Dreamcast ports 0-3. The calibrated pad is only
+# index 0 when no wireless controller is connected, so it must not be assumed.
+# Everything at or beyond the roster count is detached, leaving unused Maple
+# ports empty rather than letting a stray device acquire one.
+roster_count=""
+if [ -n "${SDL_JOYSTICK_DEVICE:-}" ]; then
+    roster_count="$(printf '%s' "$SDL_JOYSTICK_DEVICE" | awk -F: '{ print NF }')"
+elif [ -n "${JAWAKA_INPUT_ROSTER_COUNT:-}" ]; then
+    roster_count="$JAWAKA_INPUT_ROSTER_COUNT"
+fi
+
+if [ -n "$roster_count" ]; then
+    case "$roster_count" in
+        ''|*[!0-9]*)
+            echo "invalid Jawaka input roster count: $roster_count" >&2
+            exit 1
+            ;;
+    esac
+    if [ "$roster_count" -lt 1 ]; then
+        echo "empty Jawaka input roster" >&2
+        exit 1
+    fi
+    if [ "$roster_count" -gt 4 ]; then
+        roster_count=4
+    fi
+    joystick_index=0
+    while [ "$joystick_index" -lt 16 ]; do
+        if [ "$joystick_index" -lt "$roster_count" ]; then
+            append_override "input:maple_sdl_joystick_${joystick_index}=${joystick_index}"
+        else
+            append_override "input:maple_sdl_joystick_${joystick_index}=-1"
+        fi
+        joystick_index=$((joystick_index + 1))
+    done
+elif [ -n "${JAWAKA_RETROARCH_JOYPAD_INDEX:-}" ]; then
     case "$JAWAKA_RETROARCH_JOYPAD_INDEX" in
         *[!0-9]*)
             echo "invalid Jawaka virtual joypad index: $JAWAKA_RETROARCH_JOYPAD_INDEX" >&2
