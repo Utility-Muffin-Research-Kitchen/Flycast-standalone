@@ -44,11 +44,12 @@ EOF
 chmod 0755 "$PACKAGE_DIR/bin/flycast" "$PACKAGE_DIR/launch.sh"
 
 run_wrapper() {
+    bios_path="${1:-$BIOS_PATH_TEST}"
     env -u UMRK_ENV_FILE \
         PLATFORM=mlp1 \
         SDCARD_PATH="$SDCARD_PATH_TEST" \
         USERDATA_PATH="$USERDATA_PATH_TEST" \
-        BIOS_PATH="$BIOS_PATH_TEST" \
+        BIOS_PATH="$bios_path" \
         SAVES_PATH="$SAVES_PATH_TEST" \
         STATES_PATH="$STATES_PATH_TEST" \
         CHEATS_PATH="$CHEATS_PATH_TEST" \
@@ -81,7 +82,7 @@ grep -F 'SDL_VIDEODRIVER=<kmsdrm>' "$LOG_FILE" >/dev/null
 grep -F 'SDL_AUDIODRIVER=<pulseaudio>' "$LOG_FILE" >/dev/null
 grep -F 'FLYCAST_UI_ROTATE_90=<1>' "$LOG_FILE" >/dev/null
 grep -F 'arg_0=<-config>' "$LOG_FILE" >/dev/null
-grep -F "config:Dreamcast.BiosPath=$BIOS_PATH_TEST" "$LOG_FILE" >/dev/null
+grep -F "config:Dreamcast.BiosPath=$BIOS_PATH_TEST/dc;$BIOS_PATH_TEST" "$LOG_FILE" >/dev/null
 grep -F "config:Dreamcast.VMUPath=$SAVES_PATH_TEST/Flycast" "$LOG_FILE" >/dev/null
 grep -F "config:Dreamcast.SavestatePath=$STATES_PATH_TEST/Flycast" "$LOG_FILE" >/dev/null
 grep -F 'input:maple_sdl_joystick_0=-1' "$LOG_FILE" >/dev/null
@@ -128,6 +129,11 @@ fi
 
 if "$PACKAGE_DIR/launch.sh" "$TMP_ROOT/missing.chd" >/dev/null 2>&1; then
     echo "launch wrapper accepted a missing ROM" >&2
+    exit 1
+fi
+
+if run_wrapper "$BIOS_PATH_TEST;untrusted" >/dev/null 2>&1; then
+    echo "launch wrapper accepted a BIOS path containing a config delimiter" >&2
     exit 1
 fi
 
