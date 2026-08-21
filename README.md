@@ -1,8 +1,9 @@
 # Flycast Standalone for Leaf / Miniloong Pocket 1
 
-Reproducible standalone Flycast builds for Leaf on the Miniloong Pocket 1.
-The first target is performance and compatibility parity with the validated
-MinUI reference while using the latest stable upstream Flycast release.
+Reproducible standalone Flycast builds for Dreamcast, Atomiswave, and the
+Naomi family on Leaf for the Miniloong Pocket 1. The first target is performance
+and compatibility parity with the validated MinUI reference while using the
+latest stable upstream Flycast release.
 
 Primary commands:
 
@@ -42,10 +43,11 @@ values from `probe-overrides.txt` in the probe root. This keeps tuning arms
 isolated from both the packaged defaults and durable user configuration.
 
 The production wrapper keeps configuration under `USERDATA_PATH`, but derives
-Dreamcast data/VMUs and save states from Jawaka's source-specific `SAVES_PATH`
-and `STATES_PATH`. It passes BIOS, storage, mapping, renderer, and orientation
-invariants through Flycast v2.6's native virtual-config options. The package
-manifest inventories and hashes every payload file.
+Flycast data/VMUs and save states from Jawaka's source-specific `SAVES_PATH`
+and `STATES_PATH`. It searches the shared RetroArch-compatible `BIOS/dc`
+directory before the historic BIOS root, then passes storage, mapping, renderer,
+and orientation invariants through Flycast v2.6's native virtual-config options.
+The package manifest inventories and hashes every payload file.
 
 Useful narrow checks:
 
