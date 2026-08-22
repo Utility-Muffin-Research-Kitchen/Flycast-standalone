@@ -82,7 +82,7 @@ The package contains no BIOS or game content.
 Runtime layout:
 
 - Config and cache: USERDATA_PATH/flycast
-- BIOS: BIOS_PATH/dc first, then BIOS_PATH for legacy standalone installs
+- BIOS: BIOS_PATH/dc
 - Dreamcast data and VMUs: SAVES_PATH/Flycast
 - Save states: STATES_PATH/Flycast
 - Logs: LOGS_PATH/flycast

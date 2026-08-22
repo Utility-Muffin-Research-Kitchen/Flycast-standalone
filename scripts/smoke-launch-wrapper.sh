@@ -82,7 +82,11 @@ grep -F 'SDL_VIDEODRIVER=<kmsdrm>' "$LOG_FILE" >/dev/null
 grep -F 'SDL_AUDIODRIVER=<pulseaudio>' "$LOG_FILE" >/dev/null
 grep -F 'FLYCAST_UI_ROTATE_90=<1>' "$LOG_FILE" >/dev/null
 grep -F 'arg_0=<-config>' "$LOG_FILE" >/dev/null
-grep -F "config:Dreamcast.BiosPath=$BIOS_PATH_TEST/dc;$BIOS_PATH_TEST" "$LOG_FILE" >/dev/null
+grep -F "config:Dreamcast.BiosPath=$BIOS_PATH_TEST/dc" "$LOG_FILE" >/dev/null
+if grep -F "$BIOS_PATH_TEST/dc;$BIOS_PATH_TEST" "$LOG_FILE" >/dev/null; then
+    echo "launch wrapper retained the legacy BIOS root fallback" >&2
+    exit 1
+fi
 grep -F "config:Dreamcast.VMUPath=$SAVES_PATH_TEST/Flycast" "$LOG_FILE" >/dev/null
 grep -F "config:Dreamcast.SavestatePath=$STATES_PATH_TEST/Flycast" "$LOG_FILE" >/dev/null
 grep -F 'input:maple_sdl_joystick_0=-1' "$LOG_FILE" >/dev/null

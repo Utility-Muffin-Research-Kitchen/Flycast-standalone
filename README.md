@@ -45,8 +45,8 @@ isolated from both the packaged defaults and durable user configuration.
 The production wrapper keeps configuration under `USERDATA_PATH`, but derives
 Flycast data/VMUs and save states from Jawaka's source-specific `SAVES_PATH`
 and `STATES_PATH`. It searches the shared RetroArch-compatible `BIOS/dc`
-directory before the historic BIOS root, then passes storage, mapping, renderer,
-and orientation invariants through Flycast v2.6's native virtual-config options.
+directory, then passes storage, mapping, renderer, and orientation invariants
+through Flycast v2.6's native virtual-config options.
 The package manifest inventories and hashes every payload file.
 
 The canonical user-supplied files are `BIOS/dc/dc_boot.bin` (optional but
