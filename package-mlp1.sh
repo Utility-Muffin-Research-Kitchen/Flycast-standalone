@@ -93,6 +93,9 @@ native per-game settings as sections in the same durable emu.cfg; the package
 does not duplicate the global config. MLP1 renderer, rotation, output, mapping,
 and storage paths are launch-time safety invariants.
 
+On MLP1, Select inserts an arcade coin in Atomiswave and Naomi games. Menu
+opens Flycast's native menu.
+
 The RetroArch Flycast cores remain available as fallbacks.
 EOF
 

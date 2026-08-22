@@ -51,6 +51,7 @@ RUNTIME_DIR="$UMRK_RUNTIME_PATH/flycast"
 DEFAULTS_VERSION_FILE="$ROOT_DIR/defaults/config.version"
 INSTALLED_VERSION_FILE="$CONFIG_DIR/.umrk-defaults-version"
 LEGACY_V1_MAPPING_SHA256="f3ccd1c95c184463964299cc2803b3b8455d7a706b42492bb0a747747ad01e6f"
+LEGACY_V3_MAPPING_SHA256="d17e7f403db37c5762857561f9ce4242f9123c9a92433e7988ba90114acc2b8c"
 
 if [ ! -f "$DEFAULTS_VERSION_FILE" ]; then
     echo "Flycast package is missing defaults/config.version" >&2
@@ -119,6 +120,16 @@ if [ "$INSTALLED_VERSION" -lt "$DEFAULTS_VERSION" ]; then
             else
                 rm -f "$emu_cfg_new"
             fi
+        fi
+    fi
+    # Version 4 maps the MLP1 Select button to Dreamcast button D, which is
+    # Flycast's Coin input for Atomiswave and Naomi. Replace only the exact
+    # shipped v3 mapping so controller customizations remain untouched.
+    if [ "$INSTALLED_VERSION" -lt 4 ]; then
+        mapping_file="$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
+        mapping_sha="$(sha256sum "$mapping_file" | awk '{print $1}')"
+        if [ "$mapping_sha" = "$LEGACY_V3_MAPPING_SHA256" ]; then
+            cp "$ROOT_DIR/defaults/SDL_Loong Gamepad.cfg" "$mapping_file"
         fi
     fi
     printf '%s\n' "$DEFAULTS_VERSION" >"$INSTALLED_VERSION_FILE"

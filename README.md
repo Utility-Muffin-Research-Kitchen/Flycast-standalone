@@ -55,6 +55,9 @@ recommended for Dreamcast), `BIOS/dc/awbios.zip`, `BIOS/dc/naomi.zip`, and
 Current Flycast creates its own writable Dreamcast NVRAM; `dc_flash.bin` is not
 required.
 
+On MLP1, **Select** is mapped to Flycast's arcade Coin input for Atomiswave and
+Naomi. **Menu** opens Flycast's native menu.
+
 Useful narrow checks:
 
 ```sh

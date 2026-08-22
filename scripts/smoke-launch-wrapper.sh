@@ -97,8 +97,13 @@ grep -F "arg_2=<$ROM_PATH>" "$LOG_FILE" >/dev/null
 
 # Recreate the shipped version-1 state and prove the migrations run: version 2
 # moves the Menu button from Exit to Flycast's native menu, version 3 attaches
-# the Jump Pack to controller 1's second expansion slot so games can rumble.
-sed 's/10:btn_menu/10:btn_escape/' \
+# the Jump Pack, and version 4 maps Select to the arcade Coin input.
+sed -e 's/10:btn_menu/10:btn_escape/' \
+    -e '/^bind8 = 8:btn_d$/d' \
+    -e 's/^bind9 = 256:/bind8 = 256:/' \
+    -e 's/^bind10 = 257:/bind9 = 257:/' \
+    -e 's/^bind11 = 258:/bind10 = 258:/' \
+    -e 's/^bind12 = 259:/bind11 = 259:/' \
     "$PACKAGE_DIR/defaults/SDL_Loong Gamepad.cfg" \
     >"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
 sed -i.bak 's/^device1.2 = 3$/device1.2 = 1/' "$CONFIG_DIR/emu.cfg"
@@ -107,8 +112,24 @@ printf '1\n' >"$CONFIG_DIR/.umrk-defaults-version"
 run_wrapper
 grep -F 'bind7 = 10:btn_menu' \
     "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
+grep -F 'bind8 = 8:btn_d' \
+    "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
 grep -Fx 'device1.2 = 3' "$CONFIG_DIR/emu.cfg" >/dev/null
-grep -Fx '3' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
+grep -Fx '4' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
+
+# A byte-identical v3 mapping gains Coin without requiring a fresh install.
+sed -e '/^bind8 = 8:btn_d$/d' \
+    -e 's/^bind9 = 256:/bind8 = 256:/' \
+    -e 's/^bind10 = 257:/bind9 = 257:/' \
+    -e 's/^bind11 = 258:/bind10 = 258:/' \
+    -e 's/^bind12 = 259:/bind11 = 259:/' \
+    "$PACKAGE_DIR/defaults/SDL_Loong Gamepad.cfg" \
+    >"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
+printf '3\n' >"$CONFIG_DIR/.umrk-defaults-version"
+run_wrapper
+grep -F 'bind8 = 8:btn_d' \
+    "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
+grep -Fx '4' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
 
 printf '\n[user]\ncustom = preserved\n' >>"$CONFIG_DIR/emu.cfg"
 printf '\n# user mapping edit\n' >>"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
