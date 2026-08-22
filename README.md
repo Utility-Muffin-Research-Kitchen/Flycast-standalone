@@ -56,7 +56,8 @@ Current Flycast creates its own writable Dreamcast NVRAM; `dc_flash.bin` is not
 required.
 
 On MLP1, **Select** is mapped to Flycast's arcade Coin input for Atomiswave and
-Naomi. **Menu** opens Flycast's native menu.
+Naomi. **L1** is also mapped to Atomiswave arcade button 3 (Grenade in Metal
+Slug 6). **Menu** opens Flycast's native menu.
 
 Useful narrow checks:
 

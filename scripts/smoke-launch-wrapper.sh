@@ -97,9 +97,11 @@ grep -F "arg_2=<$ROM_PATH>" "$LOG_FILE" >/dev/null
 
 # Recreate the shipped version-1 state and prove the migrations run: version 2
 # moves the Menu button from Exit to Flycast's native menu, version 3 attaches
-# the Jump Pack, and version 4 maps Select to the arcade Coin input.
+# the Jump Pack, version 4 maps Select to Coin, and version 5 maps L1 to
+# Atomiswave arcade button 3.
 sed -e 's/10:btn_menu/10:btn_escape/' \
     -e '/^bind8 = 8:btn_d$/d' \
+    -e '/^bind13 = 4:btn_c$/d' \
     -e 's/^bind9 = 256:/bind8 = 256:/' \
     -e 's/^bind10 = 257:/bind9 = 257:/' \
     -e 's/^bind11 = 258:/bind10 = 258:/' \
@@ -114,11 +116,14 @@ grep -F 'bind7 = 10:btn_menu' \
     "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
 grep -F 'bind8 = 8:btn_d' \
     "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
+grep -F 'bind13 = 4:btn_c' \
+    "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
 grep -Fx 'device1.2 = 3' "$CONFIG_DIR/emu.cfg" >/dev/null
-grep -Fx '4' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
+grep -Fx '5' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
 
 # A byte-identical v3 mapping gains Coin without requiring a fresh install.
 sed -e '/^bind8 = 8:btn_d$/d' \
+    -e '/^bind13 = 4:btn_c$/d' \
     -e 's/^bind9 = 256:/bind8 = 256:/' \
     -e 's/^bind10 = 257:/bind9 = 257:/' \
     -e 's/^bind11 = 258:/bind10 = 258:/' \
@@ -129,7 +134,21 @@ printf '3\n' >"$CONFIG_DIR/.umrk-defaults-version"
 run_wrapper
 grep -F 'bind8 = 8:btn_d' \
     "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
-grep -Fx '4' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
+grep -F 'bind13 = 4:btn_c' \
+    "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
+grep -Fx '5' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
+
+# A byte-identical v4 mapping gains arcade Button 3 without losing L1 trigger.
+sed '/^bind13 = 4:btn_c$/d' \
+    "$PACKAGE_DIR/defaults/SDL_Loong Gamepad.cfg" \
+    >"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
+printf '4\n' >"$CONFIG_DIR/.umrk-defaults-version"
+run_wrapper
+grep -F 'bind4 = 4:btn_trigger_left' \
+    "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
+grep -F 'bind13 = 4:btn_c' \
+    "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
+grep -Fx '5' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
 
 printf '\n[user]\ncustom = preserved\n' >>"$CONFIG_DIR/emu.cfg"
 printf '\n# user mapping edit\n' >>"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"

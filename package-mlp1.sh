@@ -94,7 +94,8 @@ does not duplicate the global config. MLP1 renderer, rotation, output, mapping,
 and storage paths are launch-time safety invariants.
 
 On MLP1, Select inserts an arcade coin in Atomiswave and Naomi games. Menu
-opens Flycast's native menu.
+opens Flycast's native menu. L1 activates Atomiswave arcade button 3 (Grenade
+in Metal Slug 6) while retaining its Dreamcast left-trigger binding.
 
 The RetroArch Flycast cores remain available as fallbacks.
 EOF
