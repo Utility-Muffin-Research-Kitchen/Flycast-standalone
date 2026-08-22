@@ -55,9 +55,13 @@ recommended for Dreamcast), `BIOS/dc/awbios.zip`, `BIOS/dc/naomi.zip`, and
 Current Flycast creates its own writable Dreamcast NVRAM; `dc_flash.bin` is not
 required.
 
-On MLP1, **Select** is mapped to Flycast's arcade Coin input for Atomiswave and
-Naomi. **L1** is also mapped to Atomiswave arcade button 3 (Grenade in Metal
-Slug 6). **Menu** opens Flycast's native menu.
+The MLP1 mapping uses **L2/R2** for Dreamcast's analog triggers. Arcade buttons
+1-6 are **A**, **B**, **L1**, **X**, **Y**, and **R1**; **Select** inserts a
+coin. Metal Slug 6 therefore uses **L1** for Grenade. **Menu** opens Flycast's
+native menu.
+
+Dreamcast defaults to VGA output; Flycast falls back to composite for software
+that does not support VGA.
 
 Useful narrow checks:
 

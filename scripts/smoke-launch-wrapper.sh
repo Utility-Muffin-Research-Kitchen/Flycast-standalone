@@ -94,14 +94,39 @@ grep -F 'input:maple_sdl_joystick_1=0' "$LOG_FILE" >/dev/null
 grep -F 'config:pvr.rend=0' "$LOG_FILE" >/dev/null
 grep -F 'config:pvr.AutoSkipFrame=2' "$LOG_FILE" >/dev/null
 grep -F "arg_2=<$ROM_PATH>" "$LOG_FILE" >/dev/null
+grep -Fx 'Dreamcast.Cable = 0' "$CONFIG_DIR/emu.cfg" >/dev/null
+
+assert_current_mapping() {
+    for expected in \
+        'bind0 = 1:btn_a' \
+        'bind1 = 0:btn_b' \
+        'bind2 = 2:btn_x' \
+        'bind3 = 3:btn_y' \
+        'bind4 = 6:btn_trigger_left' \
+        'bind5 = 7:btn_trigger_right' \
+        'bind6 = 9:btn_start' \
+        'bind8 = 8:btn_d' \
+        'bind13 = 4:btn_c' \
+        'bind14 = 5:btn_z'; do
+        grep -F "$expected" \
+            "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
+    done
+    grep -Fx '6' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
+}
+
+assert_current_mapping
 
 # Recreate the shipped version-1 state and prove the migrations run: version 2
 # moves the Menu button from Exit to Flycast's native menu, version 3 attaches
 # the Jump Pack, version 4 maps Select to Coin, and version 5 maps L1 to
-# Atomiswave arcade button 3.
+# Atomiswave arcade button 3. Version 6 separates the Dreamcast triggers onto
+# L2/R2 and covers arcade button 6 on R1.
 sed -e 's/10:btn_menu/10:btn_escape/' \
     -e '/^bind8 = 8:btn_d$/d' \
     -e '/^bind13 = 4:btn_c$/d' \
+    -e '/^bind14 = 5:btn_z$/d' \
+    -e 's/^bind4 = 6:/bind4 = 4:/' \
+    -e 's/^bind5 = 7:/bind5 = 5:/' \
     -e 's/^bind9 = 256:/bind8 = 256:/' \
     -e 's/^bind10 = 257:/bind9 = 257:/' \
     -e 's/^bind11 = 258:/bind10 = 258:/' \
@@ -112,18 +137,17 @@ sed -i.bak 's/^device1.2 = 3$/device1.2 = 1/' "$CONFIG_DIR/emu.cfg"
 rm -f "$CONFIG_DIR/emu.cfg.bak"
 printf '1\n' >"$CONFIG_DIR/.umrk-defaults-version"
 run_wrapper
+assert_current_mapping
 grep -F 'bind7 = 10:btn_menu' \
     "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
-grep -F 'bind8 = 8:btn_d' \
-    "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
-grep -F 'bind13 = 4:btn_c' \
-    "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
 grep -Fx 'device1.2 = 3' "$CONFIG_DIR/emu.cfg" >/dev/null
-grep -Fx '5' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
 
 # A byte-identical v3 mapping gains Coin without requiring a fresh install.
 sed -e '/^bind8 = 8:btn_d$/d' \
     -e '/^bind13 = 4:btn_c$/d' \
+    -e '/^bind14 = 5:btn_z$/d' \
+    -e 's/^bind4 = 6:/bind4 = 4:/' \
+    -e 's/^bind5 = 7:/bind5 = 5:/' \
     -e 's/^bind9 = 256:/bind8 = 256:/' \
     -e 's/^bind10 = 257:/bind9 = 257:/' \
     -e 's/^bind11 = 258:/bind10 = 258:/' \
@@ -132,23 +156,28 @@ sed -e '/^bind8 = 8:btn_d$/d' \
     >"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
 printf '3\n' >"$CONFIG_DIR/.umrk-defaults-version"
 run_wrapper
-grep -F 'bind8 = 8:btn_d' \
-    "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
-grep -F 'bind13 = 4:btn_c' \
-    "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
-grep -Fx '5' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
+assert_current_mapping
 
-# A byte-identical v4 mapping gains arcade Button 3 without losing L1 trigger.
-sed '/^bind13 = 4:btn_c$/d' \
+# A byte-identical v4 mapping gains arcade Button 3.
+sed -e '/^bind13 = 4:btn_c$/d' \
+    -e '/^bind14 = 5:btn_z$/d' \
+    -e 's/^bind4 = 6:/bind4 = 4:/' \
+    -e 's/^bind5 = 7:/bind5 = 5:/' \
     "$PACKAGE_DIR/defaults/SDL_Loong Gamepad.cfg" \
     >"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
 printf '4\n' >"$CONFIG_DIR/.umrk-defaults-version"
 run_wrapper
-grep -F 'bind4 = 4:btn_trigger_left' \
-    "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
-grep -F 'bind13 = 4:btn_c' \
-    "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
-grep -Fx '5' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
+assert_current_mapping
+
+# A byte-identical v5 mapping gains separate triggers and arcade Button 6.
+sed -e '/^bind14 = 5:btn_z$/d' \
+    -e 's/^bind4 = 6:/bind4 = 4:/' \
+    -e 's/^bind5 = 7:/bind5 = 5:/' \
+    "$PACKAGE_DIR/defaults/SDL_Loong Gamepad.cfg" \
+    >"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
+printf '5\n' >"$CONFIG_DIR/.umrk-defaults-version"
+run_wrapper
+assert_current_mapping
 
 printf '\n[user]\ncustom = preserved\n' >>"$CONFIG_DIR/emu.cfg"
 printf '\n# user mapping edit\n' >>"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
