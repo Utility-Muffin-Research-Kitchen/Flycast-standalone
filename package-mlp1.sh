@@ -75,13 +75,14 @@ install_license "$SOURCE_DIR/core/deps/miniupnpc/LICENSE" "miniupnpc-BSD-3-Claus
 cat >"$OUTPUT_DIR/README.txt" <<'EOF'
 Flycast standalone for Leaf on Miniloong Pocket 1.
 
-Launch through Jawaka with a Dreamcast .chd, .gdi, .cdi, or .cue image.
+Launch through Jawaka with Dreamcast, Atomiswave, Naomi, Naomi GD-ROM, or
+Naomi 2 content from its Leaf ROM folder.
 The package contains no BIOS or game content.
 
 Runtime layout:
 
 - Config and cache: USERDATA_PATH/flycast
-- BIOS: BIOS_PATH selected by Jawaka for the ROM source
+- BIOS: BIOS_PATH/dc first, then BIOS_PATH for legacy standalone installs
 - Dreamcast data and VMUs: SAVES_PATH/Flycast
 - Save states: STATES_PATH/Flycast
 - Logs: LOGS_PATH/flycast

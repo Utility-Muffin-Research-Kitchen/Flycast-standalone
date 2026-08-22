@@ -1,7 +1,7 @@
 # Flycast Standalone for Leaf / Miniloong Pocket 1
 
-Reproducible standalone Flycast builds for Dreamcast, Atomiswave, and the
-Naomi family on Leaf for the Miniloong Pocket 1. The first target is performance
+Reproducible standalone Flycast builds for Dreamcast, Atomiswave, Naomi,
+Naomi GD-ROM, and Naomi 2 on Leaf for the Miniloong Pocket 1. The first target is performance
 and compatibility parity with the validated MinUI reference while using the
 latest stable upstream Flycast release.
 
@@ -48,6 +48,12 @@ and `STATES_PATH`. It searches the shared RetroArch-compatible `BIOS/dc`
 directory before the historic BIOS root, then passes storage, mapping, renderer,
 and orientation invariants through Flycast v2.6's native virtual-config options.
 The package manifest inventories and hashes every payload file.
+
+The canonical user-supplied files are `BIOS/dc/dc_boot.bin` (optional but
+recommended for Dreamcast), `BIOS/dc/awbios.zip`, `BIOS/dc/naomi.zip`, and
+`BIOS/dc/naomi2.zip`. Some Naomi games also require their named BIOS archive.
+Current Flycast creates its own writable Dreamcast NVRAM; `dc_flash.bin` is not
+required.
 
 Useful narrow checks:
 
