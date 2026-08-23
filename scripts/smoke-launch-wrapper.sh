@@ -44,11 +44,12 @@ EOF
 chmod 0755 "$PACKAGE_DIR/bin/flycast" "$PACKAGE_DIR/launch.sh"
 
 run_wrapper() {
+    bios_path="${1:-$BIOS_PATH_TEST}"
     env -u UMRK_ENV_FILE \
         PLATFORM=mlp1 \
         SDCARD_PATH="$SDCARD_PATH_TEST" \
         USERDATA_PATH="$USERDATA_PATH_TEST" \
-        BIOS_PATH="$BIOS_PATH_TEST" \
+        BIOS_PATH="$bios_path" \
         SAVES_PATH="$SAVES_PATH_TEST" \
         STATES_PATH="$STATES_PATH_TEST" \
         CHEATS_PATH="$CHEATS_PATH_TEST" \
@@ -81,7 +82,11 @@ grep -F 'SDL_VIDEODRIVER=<kmsdrm>' "$LOG_FILE" >/dev/null
 grep -F 'SDL_AUDIODRIVER=<pulseaudio>' "$LOG_FILE" >/dev/null
 grep -F 'FLYCAST_UI_ROTATE_90=<1>' "$LOG_FILE" >/dev/null
 grep -F 'arg_0=<-config>' "$LOG_FILE" >/dev/null
-grep -F "config:Dreamcast.BiosPath=$BIOS_PATH_TEST" "$LOG_FILE" >/dev/null
+grep -F "config:Dreamcast.BiosPath=$BIOS_PATH_TEST/dc" "$LOG_FILE" >/dev/null
+if grep -F "$BIOS_PATH_TEST/dc;$BIOS_PATH_TEST" "$LOG_FILE" >/dev/null; then
+    echo "launch wrapper retained the legacy BIOS root fallback" >&2
+    exit 1
+fi
 grep -F "config:Dreamcast.VMUPath=$SAVES_PATH_TEST/Flycast" "$LOG_FILE" >/dev/null
 grep -F "config:Dreamcast.SavestatePath=$STATES_PATH_TEST/Flycast" "$LOG_FILE" >/dev/null
 grep -F 'input:maple_sdl_joystick_0=-1' "$LOG_FILE" >/dev/null
@@ -89,21 +94,90 @@ grep -F 'input:maple_sdl_joystick_1=0' "$LOG_FILE" >/dev/null
 grep -F 'config:pvr.rend=0' "$LOG_FILE" >/dev/null
 grep -F 'config:pvr.AutoSkipFrame=2' "$LOG_FILE" >/dev/null
 grep -F "arg_2=<$ROM_PATH>" "$LOG_FILE" >/dev/null
+grep -Fx 'Dreamcast.Cable = 0' "$CONFIG_DIR/emu.cfg" >/dev/null
+
+assert_current_mapping() {
+    for expected in \
+        'bind0 = 1:btn_a' \
+        'bind1 = 0:btn_b' \
+        'bind2 = 2:btn_x' \
+        'bind3 = 3:btn_y' \
+        'bind4 = 6:btn_trigger_left' \
+        'bind5 = 7:btn_trigger_right' \
+        'bind6 = 9:btn_start' \
+        'bind8 = 8:btn_d' \
+        'bind13 = 4:btn_c' \
+        'bind14 = 5:btn_z'; do
+        grep -F "$expected" \
+            "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
+    done
+    grep -Fx '6' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
+}
+
+assert_current_mapping
 
 # Recreate the shipped version-1 state and prove the migrations run: version 2
 # moves the Menu button from Exit to Flycast's native menu, version 3 attaches
-# the Jump Pack to controller 1's second expansion slot so games can rumble.
-sed 's/10:btn_menu/10:btn_escape/' \
+# the Jump Pack, version 4 maps Select to Coin, and version 5 maps L1 to
+# Atomiswave arcade button 3. Version 6 separates the Dreamcast triggers onto
+# L2/R2 and covers arcade button 6 on R1.
+sed -e 's/10:btn_menu/10:btn_escape/' \
+    -e '/^bind8 = 8:btn_d$/d' \
+    -e '/^bind13 = 4:btn_c$/d' \
+    -e '/^bind14 = 5:btn_z$/d' \
+    -e 's/^bind4 = 6:/bind4 = 4:/' \
+    -e 's/^bind5 = 7:/bind5 = 5:/' \
+    -e 's/^bind9 = 256:/bind8 = 256:/' \
+    -e 's/^bind10 = 257:/bind9 = 257:/' \
+    -e 's/^bind11 = 258:/bind10 = 258:/' \
+    -e 's/^bind12 = 259:/bind11 = 259:/' \
     "$PACKAGE_DIR/defaults/SDL_Loong Gamepad.cfg" \
     >"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
 sed -i.bak 's/^device1.2 = 3$/device1.2 = 1/' "$CONFIG_DIR/emu.cfg"
 rm -f "$CONFIG_DIR/emu.cfg.bak"
 printf '1\n' >"$CONFIG_DIR/.umrk-defaults-version"
 run_wrapper
+assert_current_mapping
 grep -F 'bind7 = 10:btn_menu' \
     "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
 grep -Fx 'device1.2 = 3' "$CONFIG_DIR/emu.cfg" >/dev/null
-grep -Fx '3' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
+
+# A byte-identical v3 mapping gains Coin without requiring a fresh install.
+sed -e '/^bind8 = 8:btn_d$/d' \
+    -e '/^bind13 = 4:btn_c$/d' \
+    -e '/^bind14 = 5:btn_z$/d' \
+    -e 's/^bind4 = 6:/bind4 = 4:/' \
+    -e 's/^bind5 = 7:/bind5 = 5:/' \
+    -e 's/^bind9 = 256:/bind8 = 256:/' \
+    -e 's/^bind10 = 257:/bind9 = 257:/' \
+    -e 's/^bind11 = 258:/bind10 = 258:/' \
+    -e 's/^bind12 = 259:/bind11 = 259:/' \
+    "$PACKAGE_DIR/defaults/SDL_Loong Gamepad.cfg" \
+    >"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
+printf '3\n' >"$CONFIG_DIR/.umrk-defaults-version"
+run_wrapper
+assert_current_mapping
+
+# A byte-identical v4 mapping gains arcade Button 3.
+sed -e '/^bind13 = 4:btn_c$/d' \
+    -e '/^bind14 = 5:btn_z$/d' \
+    -e 's/^bind4 = 6:/bind4 = 4:/' \
+    -e 's/^bind5 = 7:/bind5 = 5:/' \
+    "$PACKAGE_DIR/defaults/SDL_Loong Gamepad.cfg" \
+    >"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
+printf '4\n' >"$CONFIG_DIR/.umrk-defaults-version"
+run_wrapper
+assert_current_mapping
+
+# A byte-identical v5 mapping gains separate triggers and arcade Button 6.
+sed -e '/^bind14 = 5:btn_z$/d' \
+    -e 's/^bind4 = 6:/bind4 = 4:/' \
+    -e 's/^bind5 = 7:/bind5 = 5:/' \
+    "$PACKAGE_DIR/defaults/SDL_Loong Gamepad.cfg" \
+    >"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
+printf '5\n' >"$CONFIG_DIR/.umrk-defaults-version"
+run_wrapper
+assert_current_mapping
 
 printf '\n[user]\ncustom = preserved\n' >>"$CONFIG_DIR/emu.cfg"
 printf '\n# user mapping edit\n' >>"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"
@@ -128,6 +202,11 @@ fi
 
 if "$PACKAGE_DIR/launch.sh" "$TMP_ROOT/missing.chd" >/dev/null 2>&1; then
     echo "launch wrapper accepted a missing ROM" >&2
+    exit 1
+fi
+
+if run_wrapper "$BIOS_PATH_TEST;untrusted" >/dev/null 2>&1; then
+    echo "launch wrapper accepted a BIOS path containing a config delimiter" >&2
     exit 1
 fi
 

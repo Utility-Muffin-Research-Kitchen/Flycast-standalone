@@ -75,13 +75,14 @@ install_license "$SOURCE_DIR/core/deps/miniupnpc/LICENSE" "miniupnpc-BSD-3-Claus
 cat >"$OUTPUT_DIR/README.txt" <<'EOF'
 Flycast standalone for Leaf on Miniloong Pocket 1.
 
-Launch through Jawaka with a Dreamcast .chd, .gdi, .cdi, or .cue image.
+Launch through Jawaka with Dreamcast, Atomiswave, Naomi, Naomi GD-ROM, or
+Naomi 2 content from its Leaf ROM folder.
 The package contains no BIOS or game content.
 
 Runtime layout:
 
 - Config and cache: USERDATA_PATH/flycast
-- BIOS: BIOS_PATH selected by Jawaka for the ROM source
+- BIOS: BIOS_PATH/dc
 - Dreamcast data and VMUs: SAVES_PATH/Flycast
 - Save states: STATES_PATH/Flycast
 - Logs: LOGS_PATH/flycast
@@ -91,6 +92,11 @@ The initial config uses the validated performance profile. Flycast stores
 native per-game settings as sections in the same durable emu.cfg; the package
 does not duplicate the global config. MLP1 renderer, rotation, output, mapping,
 and storage paths are launch-time safety invariants.
+
+On MLP1, L2/R2 are the Dreamcast triggers. Arcade buttons 1-6 are A, B, L1, X,
+Y, and R1; Select inserts a coin. L1 is therefore Grenade in Metal Slug 6.
+Menu opens Flycast's native menu. Dreamcast defaults to VGA output and falls
+back to composite for incompatible software.
 
 The RetroArch Flycast cores remain available as fallbacks.
 EOF
