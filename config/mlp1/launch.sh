@@ -1,5 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# LOG-SAFE-1. The session log lives on a FAT card and can go unwritable (a bad
+# cluster chain, a full card, or the FAT32 4 GiB per-file ceiling). stdout and
+# stderr here are inherited from the launcher and point at that file. Under
+# set -e a failed echo would abort this script and the game would never start,
+# so probe both once and fall back to /dev/null, then never let a log write
+# decide whether a game launches.
+leaf_log_probe() {
+    # A real byte, not a zero-length write: a 0-byte write can succeed without
+    # touching the device and would not detect EIO/EFBIG. The subshell ignores
+    # SIGXFSZ: at the FAT32 ceiling the kernel raises it and its default action
+    # would kill this shell before the write could fail with EFBIG.
+    ( trap '' XFSZ; printf '\n' ) 2>/dev/null
+}
+leaf_log_probe >/dev/null 2>&1 || true
+if ! leaf_log_probe; then
+    exec >/dev/null
+fi
+if ! leaf_log_probe >&2; then
+    exec 2>/dev/null
+fi
+
+log() { ( trap '' XFSZ; printf '%s\n' "$*" ) 2>/dev/null || true; }
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -13,13 +35,13 @@ elif [ -n "${SDCARD_PATH:-}" ] && [ -n "${PLATFORM:-}" ] &&
 fi
 
 if [ "$#" -ne 1 ]; then
-    echo "usage: $0 ROM" >&2
+    log "usage: $0 ROM"
     exit 2
 fi
 
 ROM_PATH="$1"
 if [ ! -f "$ROM_PATH" ]; then
-    echo "Flycast ROM not found: $ROM_PATH" >&2
+    log "Flycast ROM not found: $ROM_PATH"
     exit 1
 fi
 
@@ -56,13 +78,13 @@ LEGACY_V4_MAPPING_SHA256="378c175613d93205237592dadb8156c0903839f784feb0eec60db0
 LEGACY_V5_MAPPING_SHA256="8b6f09f1945e435438610d9edd5d5491c0e6fd6c5800c00e22fa40d9803ea9a4"
 
 if [ ! -f "$DEFAULTS_VERSION_FILE" ]; then
-    echo "Flycast package is missing defaults/config.version" >&2
+    log "Flycast package is missing defaults/config.version"
     exit 1
 fi
 DEFAULTS_VERSION="$(tr -d '[:space:]' <"$DEFAULTS_VERSION_FILE")"
 case "$DEFAULTS_VERSION" in
     ''|*[!0-9]*)
-        echo "invalid Flycast defaults version: $DEFAULTS_VERSION" >&2
+        log "invalid Flycast defaults version: $DEFAULTS_VERSION"
         exit 1
         ;;
 esac
@@ -83,7 +105,7 @@ if [ -f "$INSTALLED_VERSION_FILE" ]; then
     INSTALLED_VERSION="$(tr -d '[:space:]' <"$INSTALLED_VERSION_FILE")"
     case "$INSTALLED_VERSION" in
         ''|*[!0-9]*)
-            echo "invalid installed Flycast defaults version: $INSTALLED_VERSION" >&2
+            log "invalid installed Flycast defaults version: $INSTALLED_VERSION"
             exit 1
             ;;
     esac
@@ -171,7 +193,7 @@ export FLYCAST_UI_ROTATE_90=1
 validate_virtual_path() {
     case "$2" in
         *','*|*';'*|*$'\n'*)
-            echo "Flycast $1 path contains an unsupported config delimiter: $2" >&2
+            log "Flycast $1 path contains an unsupported config delimiter: $2"
             exit 1
             ;;
     esac
@@ -227,12 +249,12 @@ fi
 if [ -n "$roster_count" ]; then
     case "$roster_count" in
         ''|*[!0-9]*)
-            echo "invalid Jawaka input roster count: $roster_count" >&2
+            log "invalid Jawaka input roster count: $roster_count"
             exit 1
             ;;
     esac
     if [ "$roster_count" -lt 1 ]; then
-        echo "empty Jawaka input roster" >&2
+        log "empty Jawaka input roster"
         exit 1
     fi
     if [ "$roster_count" -gt 4 ]; then
@@ -250,12 +272,12 @@ if [ -n "$roster_count" ]; then
 elif [ -n "${JAWAKA_RETROARCH_JOYPAD_INDEX:-}" ]; then
     case "$JAWAKA_RETROARCH_JOYPAD_INDEX" in
         *[!0-9]*)
-            echo "invalid Jawaka virtual joypad index: $JAWAKA_RETROARCH_JOYPAD_INDEX" >&2
+            log "invalid Jawaka virtual joypad index: $JAWAKA_RETROARCH_JOYPAD_INDEX"
             exit 1
             ;;
     esac
     if [ "$JAWAKA_RETROARCH_JOYPAD_INDEX" -gt 15 ]; then
-        echo "Jawaka virtual joypad index is out of range: $JAWAKA_RETROARCH_JOYPAD_INDEX" >&2
+        log "Jawaka virtual joypad index is out of range: $JAWAKA_RETROARCH_JOYPAD_INDEX"
         exit 1
     fi
     joystick_index=0
@@ -274,7 +296,14 @@ if [ -n "${FLYCAST_CONFIG_OVERRIDES:-}" ]; then
 fi
 
 cd "$ROOT_DIR"
-: >"$LOG_FILE"
+# LOG-SAFE-1. The Flycast log lives on the same FAT card as the session log, so
+# this redirect gets the same treatment: prove the file can take a real byte,
+# then either log there or log nowhere, but never fail the launch on it.
+if : >"$LOG_FILE" 2>/dev/null && leaf_log_probe >>"$LOG_FILE"; then
+    exec >>"$LOG_FILE" 2>&1
+else
+    exec >/dev/null 2>&1
+fi
 exec "$ROOT_DIR/bin/flycast" \
     -config "$config_override" \
-    "$ROM_PATH" >>"$LOG_FILE" 2>&1
+    "$ROM_PATH"
