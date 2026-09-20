@@ -1,5 +1,5 @@
 diff --git a/core/rend/gles/opengl_driver.cpp b/core/rend/gles/opengl_driver.cpp
-index 001999cc..ac26866f 100644
+index 9c665f4a..1d7887fd 100644
 --- a/core/rend/gles/opengl_driver.cpp
 +++ b/core/rend/gles/opengl_driver.cpp
 @@ -64,6 +64,35 @@ void OpenGLDriver::renderDrawData(ImDrawData* drawData, bool gui_open)
@@ -39,10 +39,10 @@ index 001999cc..ac26866f 100644
  	if (gui_open)
  		frameRendered = true;
 diff --git a/core/ui/gui.cpp b/core/ui/gui.cpp
-index 739c956b..80f41a06 100644
+index b3da1be4..cb77cbe3 100644
 --- a/core/ui/gui.cpp
 +++ b/core/ui/gui.cpp
-@@ -402,15 +402,23 @@ void gui_set_mouse_wheel(float delta) {
+@@ -310,16 +310,24 @@ void gui_set_mouse_wheel(float delta) {
  static void gui_newFrame()
  {
  	imguiDriver->newFrame();
@@ -58,6 +58,7 @@ index 739c956b..80f41a06 100644
  
  	ImGuiIO& io = ImGui::GetIO();
  
+ 	io.AddMouseSourceEvent(mouseTouchscreen ? ImGuiMouseSource_TouchScreen : ImGuiMouseSource_Mouse);
 -	if (mouseX < 0 || mouseX >= settings.display.width || mouseY < 0 || mouseY >= settings.display.height)
 +	const int uiMouseX = rotateUi90 ? settings.display.height - mouseY : mouseX;
 +	const int uiMouseY = rotateUi90 ? mouseX : mouseY;
@@ -67,6 +68,6 @@ index 739c956b..80f41a06 100644
  	else
 -		io.AddMousePosEvent(mouseX, mouseY);
 +		io.AddMousePosEvent(uiMouseX, uiMouseY);
- 	static bool delayTouch;
- #if defined(__ANDROID__) || defined(TARGET_IPHONE) || defined(__SWITCH__)
- 	// Delay touch by one frame to allow widgets to be hovered before click
+ 	if (io.WantCaptureMouse)
+ 	{
+ 		io.AddMouseWheelEvent(0, -mouseWheel / 16);
