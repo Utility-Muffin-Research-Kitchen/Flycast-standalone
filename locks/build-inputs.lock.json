@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "mlp1_toolchain_image": "ghcr.io/utility-muffin-research-kitchen/mlp1-toolchain@sha256:66aac16fb8b07e663c9b4d66970f272df195a6eba98dfad8286eabbaa617faf9",
+  "mlp1_toolchain_image_note": "Digest-pinned published toolchain. The locally built ':local' tag is not a build input: it is produced from an unpinned main checkout and its content can drift between machines. Override TOOLCHAIN_IMAGE only for deliberate toolchain development, never for the distributable lane.",
+  "flags": {
+    "project": "Utility-Muffin-Research-Kitchen/mlp1-toolchain",
+    "commit": "4a34497d90654bb4478852ccd99452ab2889de0f",
+    "archive": {
+      "type": "github-commit-tarball",
+      "url": "https://github.com/Utility-Muffin-Research-Kitchen/mlp1-toolchain/archive/4a34497d90654bb4478852ccd99452ab2889de0f.tar.gz",
+      "filename": "mlp1-toolchain-4a34497d9065.tar.gz",
+      "size": 12095,
+      "sha256": "435fe68a72cca46d942390e581ab9ecf67036db3a583de794155e831f8b0a4bf"
+    },
+    "files": [
+      {
+        "path": "flags/mlp1-build-flags.env",
+        "sha256": "2a36b9c71f21c9de1579c26f8fd774ed98671e80b52210057770189de0b953a2"
+      },
+      {
+        "path": "flags/mlp1-build-flags.mk",
+        "sha256": "df1cc0978f74aacec95ec2dfb54518a61a4cdaa6fc9c1f8267ffe55a9048986f"
+      }
+    ],
+    "note": "Replaces the sibling ../mlp1-toolchain/flags mount: an arbitrary local checkout is not reproducible. The archive hash is the size/SHA receipt for one fetch of the pinned commit; GitHub tarballs are re-encoded occasionally (observed 2026-09-20: 12095 bytes via the API, 12081 via the web URL, identical extracted contents), so the file rows below are the authoritative check and a drifted receipt alone never blocks the build."
+  }
+}

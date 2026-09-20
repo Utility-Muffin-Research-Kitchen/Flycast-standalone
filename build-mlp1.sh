@@ -2,8 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOCK="$ROOT_DIR/locks/build-inputs.lock.json"
 DOCKER="${DOCKER:-docker}"
-TOOLCHAIN_IMAGE="${TOOLCHAIN_IMAGE:-ghcr.io/utility-muffin-research-kitchen/mlp1-toolchain:local}"
+TOOLCHAIN_IMAGE="${TOOLCHAIN_IMAGE:-$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["mlp1_toolchain_image"])' "$LOCK")}"
 BUILD_JOBS="${BUILD_JOBS:-}"
 MLP1_BUILD_PROFILE="${MLP1_BUILD_PROFILE:-perf}"
 SOURCE_DIR="${FLYCAST_SOURCE_DIR:-$ROOT_DIR/workdir/mlp1/flycast}"
@@ -12,17 +13,19 @@ ARTIFACT_DIR="${MLP1_ARTIFACT_DIR:-$ROOT_DIR/output/mlp1/build}"
 
 if ! "$DOCKER" image inspect "$TOOLCHAIN_IMAGE" >/dev/null 2>&1; then
     echo "missing Docker image: $TOOLCHAIN_IMAGE" >&2
-    echo "build it with: make -C ../mlp1-toolchain image" >&2
+    echo "pull the lock-recorded published image, or build a development image" >&2
+    echo "with make -C ../mlp1-toolchain image and pass TOOLCHAIN_IMAGE explicitly" >&2
     exit 1
 fi
 
 "$ROOT_DIR/scripts/fetch-upstream.sh"
+"$ROOT_DIR/scripts/fetch-build-inputs.sh"
 
 mkdir -p "$BUILD_DIR" "$ARTIFACT_DIR"
 
 "$DOCKER" run --rm \
     -v "$ROOT_DIR":/build \
-    -v "$ROOT_DIR/../mlp1-toolchain/flags":/umrk-flags:ro \
+    -v "$ROOT_DIR/workdir/build-inputs/flags":/umrk-flags:ro \
     -w /build \
     -e BUILD_JOBS="$BUILD_JOBS" \
     -e MLP1_BUILD_PROFILE="$MLP1_BUILD_PROFILE" \

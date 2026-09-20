@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOCKER="${DOCKER:-docker}"
-TOOLCHAIN_IMAGE="${TOOLCHAIN_IMAGE:-ghcr.io/utility-muffin-research-kitchen/mlp1-toolchain:local}"
+TOOLCHAIN_IMAGE="${TOOLCHAIN_IMAGE:-$(python3 -c 'import json; print(json.load(open("'"$ROOT_DIR"'/locks/build-inputs.lock.json"))["mlp1_toolchain_image"])')}"
 BINARY="${MLP1_BINARY:-$ROOT_DIR/output/mlp1/build/bin/flycast}"
 
 if [ ! -x "$BINARY" ]; then

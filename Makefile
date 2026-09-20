@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 
 DOCKER ?= docker
-TOOLCHAIN_IMAGE ?= ghcr.io/utility-muffin-research-kitchen/mlp1-toolchain:local
+TOOLCHAIN_IMAGE ?= $(shell python3 -c 'import json; print(json.load(open("locks/build-inputs.lock.json"))["mlp1_toolchain_image"])')
 BUILD_JOBS ?=
 MLP1_BUILD_PROFILE ?= perf
 
