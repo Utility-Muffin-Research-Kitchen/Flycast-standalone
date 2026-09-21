@@ -13,8 +13,12 @@ make verify-mlp1
 make package-mlp1
 ```
 
-The build uses the sibling `mlp1-toolchain` Docker image. Upstream source and
-all generated artifacts stay in ignored `workdir/` and `output/` directories.
+The distributable lane builds inside the digest-pinned published
+`mlp1-toolchain` image and the locked flag files recorded in
+`locks/build-inputs.lock.json`, so a clean clone needs neither a local
+`mlp1-toolchain` checkout nor a locally tagged image. `scripts/fetch-build-inputs.sh`
+fetches and hash-verifies the flags; upstream source and all generated artifacts
+stay in the ignored `workdir/` and `output/` directories.
 
 `make package-mlp1` writes `output/mlp1/flycast/`. Leaf will eventually stage
 that directory under:
@@ -46,7 +50,7 @@ The production wrapper keeps configuration under `USERDATA_PATH`, but derives
 Flycast data/VMUs and save states from Jawaka's source-specific `SAVES_PATH`
 and `STATES_PATH`. It searches the shared RetroArch-compatible `BIOS/dc`
 directory, then passes storage, mapping, renderer, and orientation invariants
-through Flycast v2.6's native virtual-config options.
+through Flycast v2.7's native virtual-config options.
 The package manifest inventories and hashes every payload file.
 
 The canonical user-supplied files are `BIOS/dc/dc_boot.bin` (optional but

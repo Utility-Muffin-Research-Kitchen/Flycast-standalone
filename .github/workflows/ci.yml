@@ -1,0 +1,68 @@
+name: ci
+
+# Builds the pinned Flycast binary in the digest-pinned public toolchain image
+# and runs the host checks. This is the independent arm64 build the
+# reproducibility gate needs: the runner starts from a bare clone of this
+# repository, pulls only public inputs, and needs no UMRK workspace, sibling
+# checkout, device, or account.
+#
+# This is ordinary CI only. It runs on pushes to main and on pull requests, and
+# never cuts a tag or publishes an artifact to a release. A deliberate release
+# workflow is a separate concern owned by the content-pak delivery (F3); it must
+# not be folded into this file.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build and host checks
+    # Native arm64 runner: the toolchain image is published for linux/arm64, so
+    # the build runs without QEMU and matches the device architecture.
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # One build drives every check. `package-mlp1` fetches the pinned upstream
+      # source and submodules, fetches and hash-verifies the locked build flags,
+      # builds in the digest-pinned image, assembles the payload, and runs the
+      # package verifier. Calling `make verify-mlp1` or `make verify-package-mlp1`
+      # would rebuild, because both Makefile targets depend on build-mlp1.
+      - name: Build the locked MLP1 payload
+        run: make package-mlp1
+
+      - name: Verify the ELF, achievements and HTTPS linkage
+        run: ./scripts/verify-mlp1-binary.sh
+
+      - name: Verify launch wrapper handoff and scrubbing
+        run: make smoke-launch-wrapper
+
+      - name: Replay the shared account contract fixtures
+        run: make ra-account-contract-test
+
+      - name: Verify the assembled package
+        run: ./scripts/verify-mlp1-package.sh
+
+      - name: Show the locked binary identity
+        run: |
+          binary=output/mlp1/build/bin/flycast
+          printf 'binary_sha256=%s\n' "$(sha256sum "$binary" | awk '{print $1}')"
+          jq -r '"upstream_tag=" + .upstream_tag,
+                 "upstream_sha=" + .upstream_sha,
+                 "toolchain_image_id=" + .toolchain_image_id' \
+            output/mlp1/build/build-manifest.json
+
+      - name: Upload the assembled payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: flycast-mlp1-payload
+          path: output/mlp1/flycast
+          if-no-files-found: error
