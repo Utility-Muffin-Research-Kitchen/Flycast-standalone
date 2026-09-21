@@ -39,7 +39,16 @@ mkdir -p "$BUILD_DIR" "$ARTIFACT_DIR"
     "$TOOLCHAIN_IMAGE" \
     bash /build/scripts/build-mlp1-in-docker.sh
 
-image_id="$("$DOCKER" image inspect "$TOOLCHAIN_IMAGE" --format '{{.Id}}')"
+# Record the digest the lock pins, not the host's runtime image id. Docker's
+# .Id is a per-host config digest and can differ between an arm64 macOS Docker
+# and a GitHub arm64 runner even for the same image, which would put a
+# machine-specific value into the packaged provenance. A dev build by tag has
+# no digest, so fall back to the local id there.
+if [[ "$TOOLCHAIN_IMAGE" == *@sha256:* ]]; then
+    image_id="sha256:${TOOLCHAIN_IMAGE##*@sha256:}"
+else
+    image_id="$("$DOCKER" image inspect "$TOOLCHAIN_IMAGE" --format '{{.Id}}')"
+fi
 binary_sha="$(shasum -a 256 "$ARTIFACT_DIR/bin/flycast" | awk '{print $1}')"
 source_sha="$(git -C "$SOURCE_DIR" rev-parse HEAD)"
 source_date_epoch="$(git -C "$SOURCE_DIR" show -s --format=%ct HEAD)"
