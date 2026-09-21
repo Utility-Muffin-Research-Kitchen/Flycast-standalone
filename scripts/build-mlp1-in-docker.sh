@@ -13,6 +13,10 @@ if [ -z "$jobs" ]; then
     jobs="$(nproc)"
 fi
 
+# The source tree is bind-mounted from the host, so its ownership does not match
+# the container user and git refuses to read it without this exception.
+git config --global --add safe.directory "$SOURCE_DIR"
+
 SOURCE_DATE_EPOCH="$(git -C "$SOURCE_DIR" show -s --format=%ct HEAD)"
 export SOURCE_DATE_EPOCH
 
