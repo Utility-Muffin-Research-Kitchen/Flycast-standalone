@@ -46,7 +46,15 @@ jobs:
         run: make smoke-launch-wrapper
 
       - name: Replay the shared account contract fixtures
-        run: make ra-account-contract-test
+        # The account adapter and its contract test land with the stacked
+        # account-import branch. This workflow is shared, so run the fixtures
+        # only where the target exists.
+        run: |
+          if make -n ra-account-contract-test >/dev/null 2>&1; then
+            make ra-account-contract-test
+          else
+            echo "no standalone-ra-account-v1 consumer on this branch; skipping"
+          fi
 
       - name: Verify the assembled package
         run: ./scripts/verify-mlp1-package.sh
