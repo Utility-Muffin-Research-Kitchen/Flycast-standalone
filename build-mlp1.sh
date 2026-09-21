@@ -12,10 +12,17 @@ BUILD_DIR="${MLP1_BUILD_DIR:-$ROOT_DIR/output/mlp1/cmake}"
 ARTIFACT_DIR="${MLP1_ARTIFACT_DIR:-$ROOT_DIR/output/mlp1/build}"
 
 if ! "$DOCKER" image inspect "$TOOLCHAIN_IMAGE" >/dev/null 2>&1; then
-    echo "missing Docker image: $TOOLCHAIN_IMAGE" >&2
-    echo "pull the lock-recorded published image, or build a development image" >&2
-    echo "with make -C ../mlp1-toolchain image and pass TOOLCHAIN_IMAGE explicitly" >&2
-    exit 1
+    # A clean clone starts without the lock-recorded image. The digest is
+    # immutable and public, so pulling it is a documented pinned input, not a
+    # moving dependency. A failed pull (for example a development image that was
+    # never built) still stops the build with the explicit remedy.
+    echo "pulling Docker image: $TOOLCHAIN_IMAGE" >&2
+    if ! "$DOCKER" pull "$TOOLCHAIN_IMAGE"; then
+        echo "could not obtain Docker image: $TOOLCHAIN_IMAGE" >&2
+        echo "pull the lock-recorded published image, or build a development image" >&2
+        echo "with make -C ../mlp1-toolchain image and pass TOOLCHAIN_IMAGE explicitly" >&2
+        exit 1
+    fi
 fi
 
 "$ROOT_DIR/scripts/fetch-upstream.sh"
