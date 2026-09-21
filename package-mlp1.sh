@@ -19,6 +19,7 @@ for path in \
     "$ROOT_DIR/config/mlp1/emu.cfg" \
     "$ROOT_DIR/config/mlp1/config.version" \
     "$ROOT_DIR/config/mlp1/SDL_Loong Gamepad.cfg" \
+    "$ROOT_DIR/config/mlp1/ra-account-v1" \
     "$ROOT_DIR/licenses/THIRD-PARTY-NOTICES.txt"; do
     if [ ! -f "$path" ]; then
         echo "missing required package input: $path" >&2
@@ -32,6 +33,10 @@ mkdir -p "$OUTPUT_DIR/bin" "$OUTPUT_DIR/defaults" "$OUTPUT_DIR/licenses" \
 
 install -m 0755 "$BUILD_DIR/bin/flycast" "$OUTPUT_DIR/bin/flycast"
 install -m 0755 "$ROOT_DIR/config/mlp1/launch.sh" "$OUTPUT_DIR/launch.sh"
+# standalone-ra-account-v1 capability record. Jawaka only exports the account
+# snapshot to a release-owned Flycast launcher whose installed payload carries
+# this file, so an older payload without a consumer receives no credentials.
+install -m 0644 "$ROOT_DIR/config/mlp1/ra-account-v1" "$OUTPUT_DIR/ra-account-v1"
 install -m 0644 "$ROOT_DIR/config/mlp1/emu.cfg" "$OUTPUT_DIR/defaults/emu.cfg"
 install -m 0644 "$ROOT_DIR/config/mlp1/config.version" \
     "$OUTPUT_DIR/defaults/config.version"

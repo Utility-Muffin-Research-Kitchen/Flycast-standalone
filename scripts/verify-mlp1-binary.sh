@@ -22,6 +22,21 @@ file "$BINARY" | grep -q 'ELF 64-bit LSB.*ARM aarch64'
         binary=/build/output/mlp1/build/bin/flycast
         "$CROSS_TRIPLE-readelf" -d "$binary"
         "$CROSS_TRIPLE-readelf" --version-info "$binary"
+
+        # RetroAchievements needs real HTTPS, not just a curl symbol: the
+        # dynamic loader has to find libcurl, and the device resolves its TLS
+        # libraries through it (checked below against the real device).
+        "$CROSS_TRIPLE-readelf" -d "$binary" |
+            grep -F "Shared library: [libcurl.so.4]" >/dev/null
+
+        # Achievements compiled in, not merely available upstream.
+        "$CROSS_TRIPLE-strings" -a "$binary" | grep -F "retroachievements.org" >/dev/null
+
+        # The Leaf account bridge: the contract variables it reads and the
+        # marker it writes beside emu.cfg.
+        "$CROSS_TRIPLE-strings" -a "$binary" | grep -F "UMRK_RA_ACCOUNT_VERSION" >/dev/null
+        "$CROSS_TRIPLE-strings" -a "$binary" | grep -F "UMRK_RA_ACCOUNT_PASSWORD" >/dev/null
+        "$CROSS_TRIPLE-strings" -a "$binary" | grep -F "umrk-ra-account" >/dev/null
     '
 
 if command -v adb >/dev/null 2>&1; then

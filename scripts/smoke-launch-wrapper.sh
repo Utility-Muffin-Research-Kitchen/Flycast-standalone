@@ -32,7 +32,8 @@ cat >"$PACKAGE_DIR/bin/flycast" <<'EOF'
 set -euo pipefail
 for name in HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME \
     XDG_RUNTIME_DIR TMPDIR SDL_VIDEODRIVER SDL_AUDIODRIVER PULSE_SERVER \
-    FLYCAST_UI_ROTATE_90; do
+    FLYCAST_UI_ROTATE_90 UMRK_RA_ACCOUNT_VERSION UMRK_RA_ACCOUNT_STATE \
+    UMRK_RA_ACCOUNT_USERNAME UMRK_RA_ACCOUNT_PASSWORD UMRK_RA_ACCOUNT_REVISION; do
     printf '%s=<%s>\n' "$name" "${!name-}"
 done
 index=0
@@ -292,4 +293,126 @@ for expected in \
     fi
 done
 
-printf 'Verified launch wrapper paths, quoting, seed policy, and user-config preservation\n'
+# standalone-ra-account-v1. The snapshot must reach the emulator itself and
+# nothing else: the wrapper's own helpers run before the exec and inherit this
+# process's environment, so it is scrubbed on entry and restored only for the
+# final exec. Prove both halves at once by shadowing the helper the defaults
+# migration runs (sha256sum) with one that records what it inherited.
+SPY_DIR="$TMP_ROOT/spy"
+SPY_LOG="$TMP_ROOT/spy.log"
+mkdir -p "$SPY_DIR"
+REAL_SHA256SUM="$(command -v sha256sum)"
+if [ -z "$REAL_SHA256SUM" ]; then
+    echo "sha256sum is required by the launch wrapper smoke test" >&2
+    exit 1
+fi
+cat >"$SPY_DIR/sha256sum" <<EOF
+#!/usr/bin/env bash
+for name in UMRK_RA_ACCOUNT_VERSION UMRK_RA_ACCOUNT_STATE \\
+    UMRK_RA_ACCOUNT_USERNAME UMRK_RA_ACCOUNT_PASSWORD UMRK_RA_ACCOUNT_REVISION; do
+    printf 'helper %s=<%s>\\n' "\$name" "\${!name-}" >>"$SPY_LOG"
+done
+exec "$REAL_SHA256SUM" "\$@"
+EOF
+chmod 0755 "$SPY_DIR/sha256sum"
+
+RA_USERNAME="o'hara \"junior\""
+RA_PASSWORD='p@$$ w0rd; |, >&`~*?[]{}^%\!'
+
+run_wrapper_account() {
+    env -u UMRK_ENV_FILE \
+        PATH="$SPY_DIR:$PATH" \
+        PLATFORM=mlp1 \
+        SDCARD_PATH="$SDCARD_PATH_TEST" \
+        USERDATA_PATH="$USERDATA_PATH_TEST" \
+        BIOS_PATH="$BIOS_PATH_TEST" \
+        SAVES_PATH="$SAVES_PATH_TEST" \
+        STATES_PATH="$STATES_PATH_TEST" \
+        CHEATS_PATH="$CHEATS_PATH_TEST" \
+        LOGS_PATH="$LOGS_PATH_TEST" \
+        UMRK_RUNTIME_PATH="$RUNTIME_PATH_TEST" \
+        UMRK_RA_ACCOUNT_VERSION=1 \
+        UMRK_RA_ACCOUNT_STATE=configured \
+        UMRK_RA_ACCOUNT_USERNAME="$RA_USERNAME" \
+        UMRK_RA_ACCOUNT_PASSWORD="$RA_PASSWORD" \
+        UMRK_RA_ACCOUNT_REVISION=42 \
+        "$PACKAGE_DIR/launch.sh" "$ROM_PATH"
+}
+
+# Force the migration path so the shadowed helper actually runs this launch.
+printf '1\n' >"$CONFIG_DIR/.umrk-defaults-version"
+run_wrapper_account
+
+if [ ! -s "$SPY_LOG" ]; then
+    echo "account smoke did not exercise a wrapper helper" >&2
+    exit 1
+fi
+if grep -v '=<>$' "$SPY_LOG" >/dev/null; then
+    echo "launch wrapper leaked the account snapshot to a helper process" >&2
+    exit 1
+fi
+
+for expected in \
+    'UMRK_RA_ACCOUNT_VERSION=<1>' \
+    'UMRK_RA_ACCOUNT_STATE=<configured>' \
+    "UMRK_RA_ACCOUNT_USERNAME=<$RA_USERNAME>" \
+    "UMRK_RA_ACCOUNT_PASSWORD=<$RA_PASSWORD>" \
+    'UMRK_RA_ACCOUNT_REVISION=<42>'; do
+    if ! grep -F "$expected" "$LOG_FILE" >/dev/null; then
+        echo "launch wrapper did not hand the emulator $expected" >&2
+        exit 1
+    fi
+done
+
+# Nothing about the snapshot belongs in argv: it would be world-readable in
+# /proc for the life of the process.
+if grep -E '^arg_[0-9]+=.*UMRK_RA_ACCOUNT' "$LOG_FILE" >/dev/null; then
+    echo "launch wrapper put account data in the emulator argv" >&2
+    exit 1
+fi
+if grep -F "$RA_PASSWORD" "$LOG_FILE" | grep -v 'UMRK_RA_ACCOUNT_PASSWORD=<' >/dev/null; then
+    echo "launch wrapper logged the account password" >&2
+    exit 1
+fi
+
+# An unauthorized launch carries no snapshot, and the wrapper must not invent
+# one or leave a stale value behind.
+run_wrapper
+for name in UMRK_RA_ACCOUNT_VERSION UMRK_RA_ACCOUNT_STATE \
+    UMRK_RA_ACCOUNT_USERNAME UMRK_RA_ACCOUNT_PASSWORD UMRK_RA_ACCOUNT_REVISION; do
+    if ! grep -F "$name=<>" "$LOG_FILE" >/dev/null; then
+        echo "launch wrapper produced $name without a handoff" >&2
+        exit 1
+    fi
+done
+
+# env.sh is durable environment, never a credential source: a value that shows
+# up there is dropped rather than handed to the emulator.
+ENV_FILE="$TMP_ROOT/env.sh"
+cat >"$ENV_FILE" <<'EOF'
+export UMRK_RA_ACCOUNT_VERSION=1
+export UMRK_RA_ACCOUNT_STATE=configured
+export UMRK_RA_ACCOUNT_USERNAME=from-env-sh
+export UMRK_RA_ACCOUNT_PASSWORD=from-env-sh
+export UMRK_RA_ACCOUNT_REVISION=9
+EOF
+env -u UMRK_RA_ACCOUNT_VERSION -u UMRK_RA_ACCOUNT_STATE \
+    -u UMRK_RA_ACCOUNT_USERNAME -u UMRK_RA_ACCOUNT_PASSWORD \
+    -u UMRK_RA_ACCOUNT_REVISION \
+    UMRK_ENV_FILE="$ENV_FILE" \
+    PLATFORM=mlp1 \
+    SDCARD_PATH="$SDCARD_PATH_TEST" \
+    USERDATA_PATH="$USERDATA_PATH_TEST" \
+    BIOS_PATH="$BIOS_PATH_TEST" \
+    SAVES_PATH="$SAVES_PATH_TEST" \
+    STATES_PATH="$STATES_PATH_TEST" \
+    CHEATS_PATH="$CHEATS_PATH_TEST" \
+    LOGS_PATH="$LOGS_PATH_TEST" \
+    UMRK_RUNTIME_PATH="$RUNTIME_PATH_TEST" \
+    "$PACKAGE_DIR/launch.sh" "$ROM_PATH"
+if grep -F 'from-env-sh' "$LOG_FILE" >/dev/null; then
+    echo "launch wrapper handed the emulator credentials from env.sh" >&2
+    exit 1
+fi
+
+printf 'Verified launch wrapper paths, quoting, seed policy, account handoff, and user-config preservation\n'

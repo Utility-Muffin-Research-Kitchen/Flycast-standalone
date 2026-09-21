@@ -160,6 +160,10 @@
       {
         "path": "patches/0001-mlp1-rotate-imgui.patch",
         "sha256": "1d88c0bf64e93747df25944091316f11553e82cf34a3af9040709e0ff7eca42c"
+      },
+      {
+        "path": "patches/0002-mlp1-ra-account-import.patch",
+        "sha256": "d07c54d0dd03cc0b8c4bcadb928e30283437c44adfd752a5b4167da411b0be4d"
       }
     ]
   }

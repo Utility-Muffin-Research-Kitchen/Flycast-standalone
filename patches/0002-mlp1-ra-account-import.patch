@@ -1,0 +1,1491 @@
+diff --git a/core/achievements/CMakeLists.txt b/core/achievements/CMakeLists.txt
+index 57d8814e..62cfa317 100644
+--- a/core/achievements/CMakeLists.txt
++++ b/core/achievements/CMakeLists.txt
+@@ -1,3 +1,6 @@
+ target_sources(${PROJECT_NAME} PRIVATE
+         achievements.cpp
+-        achievements.h)
++        achievements.h
++        ra_account.h
++        ra_account_bridge.cpp
++        ra_account_contract.cpp)
+diff --git a/core/achievements/achievements.cpp b/core/achievements/achievements.cpp
+index 47375bdc..5420783e 100644
+--- a/core/achievements/achievements.cpp
++++ b/core/achievements/achievements.cpp
+@@ -19,6 +19,7 @@
+ // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+ #include "achievements.h"
+ #include "serialize.h"
++#include "ra_account.h"
+ #ifdef USE_RACHIEVEMENTS
+ #include "oslib/directory.h"
+ #include "oslib/http_client.h"
+@@ -82,6 +83,9 @@ private:
+ 
+ 	static void clientLoginWithTokenCallback(int result, const char *error_message, rc_client_t *client, void *userdata);
+ 	static void clientLoginWithPasswordCallback(int result, const char *error_message, rc_client_t *client, void *userdata);
++	// UMRK: the imported Leaf account authenticates through the same native
++	// password flow, but persists through the account bridge.
++	static void clientManagedLoginCallback(int result, const char *error_message, rc_client_t *client, void *userdata);
+ 	void authenticationSuccess(const rc_client_user_t *user);
+ 	static void clientMessageCallback(const char *message, const rc_client_t *client);
+ 	static u32 clientReadMemory(u32 address, u8 *buffer, u32 num_bytes, rc_client_t *client);
+@@ -221,7 +225,20 @@ bool Achievements::init()
+ 	//rc_client_set_spectator_mode_enabled(rc_client, 0);
+ 	loadCache();
+ 
+-	if (!config::AchievementsUserName.get().empty() && !config::AchievementsToken.get().empty())
++	// UMRK: an imported Leaf account authenticates with its password through
++	// the native flow. ra_account::import() has already invalidated any old
++	// managed token, so there is nothing here to fall back to.
++	std::string managedUser;
++	std::string managedPassword;
++	if (ra_account::takePendingLogin(managedUser, managedPassword))
++	{
++		INFO_LOG(COMMON, "RA: Authenticating the imported Leaf account '%s'...", managedUser.c_str());
++		rc_client_begin_login_with_password(rc_client, managedUser.c_str(),
++				managedPassword.c_str(), clientManagedLoginCallback, nullptr);
++		managedPassword.assign(managedPassword.size(), '\0');
++	}
++	else if (ra_account::isTokenLoginAllowed()
++		&& !config::AchievementsUserName.get().empty() && !config::AchievementsToken.get().empty())
+ 	{
+ 		INFO_LOG(COMMON, "RA: Attempting login with user '%s'...", config::AchievementsUserName.get().c_str());
+ 		rc_client_begin_login_with_token(rc_client, config::AchievementsUserName.get().c_str(),
+@@ -402,12 +419,49 @@ void Achievements::clientLoginWithTokenCallback(int result, const char *error_me
+ 	if (result != RC_OK)
+ 	{
+ 		WARN_LOG(COMMON, "RA Login failed: %s", error_message);
++		// UMRK: a rejected or expired managed token gets exactly one native
++		// password retry with the current imported credentials.
++		std::string managedUser;
++		std::string managedPassword;
++		if (ra_account::takeTokenRetry(managedUser, managedPassword))
++		{
++			rc_client_begin_login_with_password(client, managedUser.c_str(),
++					managedPassword.c_str(), clientManagedLoginCallback, nullptr);
++			managedPassword.assign(managedPassword.size(), '\0');
++			return;
++		}
+ 		notifier.notify(Notification::Login, "", i18n::Ts("RetroAchievements authentication failed"), error_message);
+ 		return;
+ 	}
+ 	achievements->authenticationSuccess(rc_client_get_user_info(client));
+ }
+ 
++// UMRK: the imported Leaf account's login result. Persistence and revision
++// acceptance belong to the bridge; a failure here leaves gameplay available
++// and never reactivates the previous account.
++void Achievements::clientManagedLoginCallback(int result, const char *error_message, rc_client_t *client,
++                                              void *userdata)
++{
++	Achievements *achievements = (Achievements *)rc_client_get_userdata(client);
++	if (result != RC_OK)
++	{
++		ra_account::reportLoginFailure(rc_error_str(result),
++				error_message != nullptr ? error_message : "");
++		return;
++	}
++	const rc_client_user_t *user = rc_client_get_user_info(client);
++	if (user == nullptr || user->token == nullptr)
++	{
++		ra_account::reportLoginFailure("no-user-token", "");
++		return;
++	}
++	if (!ra_account::commitLogin(user->token))
++		// Verified but not persisted: the bridge reported it and did not
++		// accept the revision.
++		return;
++	achievements->authenticationSuccess(user);
++}
++
+ std::future<void> Achievements::login(const char* username, const char* password)
+ {
+ 	init();
+diff --git a/core/achievements/ra_account.h b/core/achievements/ra_account.h
+new file mode 100644
+index 00000000..e5000cf7
+--- /dev/null
++++ b/core/achievements/ra_account.h
+@@ -0,0 +1,213 @@
++/*
++	UMRK: standalone-ra-account-v1 consumer for Leaf / Miniloong Pocket 1.
++
++	Flycast is free software: you can redistribute it and/or modify
++	it under the terms of the GNU General Public License as published by
++	the Free Software Foundation, either version 2 of the License, or
++	(at your option) any later version.
++*/
++// The Leaf launcher (Jawaka) owns the RetroAchievements account. It resolves
++// one coherent snapshot of it per launch and exports the five child-only
++// UMRK_RA_ACCOUNT_* variables to an authorized emulator after fork(). This
++// header is the consumer half of that contract: the classifier, the durable
++// marker beside emu.cfg, and the transition the two of them select.
++//
++// Everything declared here is deliberately free of Flycast dependencies so the
++// host fixture test can compile it on its own and replay the shared
++// leaf-contracts fixtures byte for byte. The Flycast-facing glue (config
++// options, rc_client login, native notifications) lives in ra_account_bridge.cpp.
++#pragma once
++#include <map>
++#include <string>
++#include <vector>
++
++namespace achievements::ra_account
++{
++
++// Byte limits, excluding NUL. The producer validates before storing; a
++// consumer re-validates because a truncated legacy value must never be
++// authenticated.
++constexpr size_t UsernameMaxBytes = 63;
++constexpr size_t PasswordMaxBytes = 127;
++// Inclusive ceiling, 2^62. A producer fails the save rather than wrapping, so
++// this is the largest revision a consumer ever sees.
++constexpr long long RevisionMax = 4611686018427387904LL;
++
++constexpr const char *ContractId = "standalone-ra-account-v1";
++constexpr const char *MarkerFileName = ".umrk-ra-account";
++
++enum class State
++{
++	Configured,
++	NeverConfigured,
++	SignedOut,
++	Invalid,
++	Unreadable,
++};
++
++enum class Handoff
++{
++	// No UMRK_RA_ACCOUNT_* variable is set at all: this launch is not
++	// described by the contract and native behavior is untouched.
++	None,
++	Valid,
++	// A partial, unsupported or self-contradictory snapshot. Never guessed at.
++	Malformed,
++};
++
++// One classified handoff. `username`/`password` are only populated for a
++// valid configured snapshot; `reasons` carries the contract's own rejection
++// identifiers and is always secret-free.
++struct Snapshot
++{
++	Handoff handoff = Handoff::None;
++	State state = State::Unreadable;
++	std::string username;
++	std::string password;
++	long long revision = 0;
++	std::vector<std::string> reasons;
++
++	bool hasReason(const std::string& reason) const;
++	// First rejection reason, or "" for a clean snapshot. For logs and the
++	// settings status line.
++	std::string primaryReason() const;
++};
++
++// Classify a raw environment. Values arrive as std::string so a fixture can
++// express bytes getenv() could never return (an embedded NUL truncates a C
++// string); the runtime collects the same map from getenv().
++Snapshot classify(const std::map<std::string, std::string>& env);
++
++// Collect the contract variables, plus the JAWAKA_CHEEVOS_* pair whose
++// presence means the producer failed to scrub RetroArch's own handoff, from
++// the process environment.
++std::map<std::string, std::string> collectEnv();
++
++// Remove every variable classify() looks at from the process environment, so
++// no helper this process spawns can read the password. Called immediately
++// after collectEnv(), before anything else runs.
++void clearEnv();
++
++// ---------------------------------------------------------------------------
++// Durable marker
++// ---------------------------------------------------------------------------
++
++// The marker records which managed revision this emulator has actually
++// committed. It never contains a password or a token: the token lives in
++// emu.cfg, exactly where Flycast's own login puts it.
++//
++// Two files cannot be replaced atomically, so the order is conservative:
++// pending is written BEFORE the credentials change, accepted only AFTER
++// authentication and a checked config save. A pending or malformed marker is
++// never proof of a reusable token.
++enum class Transition
++{
++	Pending,
++	Accepted,
++	SignedOut,
++};
++
++struct Marker
++{
++	Transition transition = Transition::Pending;
++	// The revision this transition refers to. 0 only for a sign-out that
++	// followed a never-configured handoff, which carries no revision.
++	long long revision = 0;
++	std::string account;
++};
++
++enum class MarkerStatus
++{
++	Absent,
++	Malformed,
++	Ok,
++};
++
++MarkerStatus readMarker(const std::string& path, Marker& out);
++// Same-directory temporary file, checked write/flush/fsync/close, then
++// rename. Returns false with the previous file intact.
++bool writeMarker(const std::string& path, const Marker& marker);
++
++// ---------------------------------------------------------------------------
++// Transition
++// ---------------------------------------------------------------------------
++
++enum class Action
++{
++	// No handoff and no managed state: this emulator's own account, if any,
++	// behaves exactly as upstream Flycast.
++	Unmanaged,
++	// Marker, snapshot and persisted account agree: reuse the stored token.
++	ReuseToken,
++	// Authenticate the snapshot's credentials and, only on success, persist
++	// the token and accept the revision.
++	ImportLogin,
++	// Clear the managed username/token and record the sign-out revision.
++	SignOut,
++	// Managed state exists but the current handoff cannot justify using it:
++	// no managed authentication this session, and nothing durable is erased.
++	SuppressManaged,
++	// Nothing managed is active and nothing managed needs protecting, but the
++	// launch is worth reporting (a malformed handoff, or a sign-out this
++	// emulator already committed). Native behavior is untouched, exactly as
++	// for Unmanaged.
++	Idle,
++};
++
++struct Decision
++{
++	Action action = Action::Unmanaged;
++	long long revision = 0;
++	std::string account;
++	// Secret-free identifier for logs and the settings status line.
++	std::string reason;
++};
++
++// Select the transition from the classified snapshot, the marker on disk and
++// what Flycast itself has persisted. Pure: the caller performs the writes.
++Decision decide(const Snapshot& snapshot, MarkerStatus markerStatus,
++		const Marker& marker, const std::string& persistedAccount,
++		bool persistedTokenPresent);
++
++// ---------------------------------------------------------------------------
++// Flycast-facing entry points (ra_account_bridge.cpp)
++// ---------------------------------------------------------------------------
++
++// Consume the handoff: classify, scrub the environment, pick the transition
++// and perform its durable part. Called once from flycast_init(), after the
++// configuration is loaded and before anything can start the achievement
++// client. Never blocks on the network.
++void import();
++
++// The three calls below are the achievement client's half of the import and
++// are only meaningful in a USE_RACHIEVEMENTS build.
++//
++// One-shot: hand the imported credentials to the native password login. The
++// bridge forgets the password as it answers.
++bool takePendingLogin(std::string& username, std::string& password);
++// One-shot: the contract's single native password retry after a stored token
++// is rejected or expires. Answers once per session, so it can never loop.
++bool takeTokenRetry(std::string& username, std::string& password);
++// False when a stored token must not be used this session (a suppressed
++// handoff, a sign-out, or an import whose login has not succeeded yet).
++bool isTokenLoginAllowed();
++// Persist a verified token and accept its revision. Returns false when the
++// configuration could not be saved, in which case nothing was accepted and
++// the failure has already been reported.
++bool commitLogin(const std::string& token);
++// Report a failed managed authentication: gameplay continues without
++// achievements, and the previous account is never reused.
++void reportLoginFailure(const std::string& reason, const std::string& detail);
++
++// True when this session is running a managed account.
++bool isManaged();
++// True when a managed account is configured but must not authenticate this
++// session (suppressed handoff, or a failed marker/config write).
++bool isSuppressed();
++// Secret-free one-line status for the native settings screen; "" when there
++// is nothing managed to report.
++std::string statusLine();
++// Managed username, or "" when unmanaged.
++std::string managedAccount();
++
++} // namespace achievements::ra_account
+diff --git a/core/achievements/ra_account_bridge.cpp b/core/achievements/ra_account_bridge.cpp
+new file mode 100644
+index 00000000..e1a57c4e
+--- /dev/null
++++ b/core/achievements/ra_account_bridge.cpp
+@@ -0,0 +1,408 @@
++/*
++	UMRK: standalone-ra-account-v1 bridge between Leaf and Flycast's own
++	RetroAchievements account.
++
++	Flycast is free software: you can redistribute it and/or modify
++	it under the terms of the GNU General Public License as published by
++	the Free Software Foundation, either version 2 of the License, or
++	(at your option) any later version.
++*/
++// The launcher (Jawaka) owns the account; this file makes Flycast a consumer
++// of it without adding a second login screen, a credential daemon or a shared
++// token store. It reuses Flycast's own rcheevos password login, its own
++// emu.cfg token field and its own notifications.
++//
++// The durable state is two files that cannot be replaced together, so the
++// order is conservative:
++//
++//   1. import(), before any credential changes: write the marker as pending
++//      for the incoming revision and stop reusing the old token in memory.
++//   2. the native password login completes.
++//   3. commitLogin(): checked emu.cfg save of username + token, then the
++//      marker becomes accepted.
++//
++// A crash anywhere in between leaves a pending marker, which is never proof
++// of a reusable token: the next launch simply imports again. Nothing here
++// writes a password or token to a log, to argv or to the marker.
++#include "ra_account.h"
++
++#ifdef USE_RACHIEVEMENTS
++#include "types.h"
++#include "cfg/cfg.h"
++#include "cfg/option.h"
++#include "oslib/oslib.h"
++#include "oslib/i18n.h"
++#include "stdclass.h"
++#include "ui/gui_achievements.h"
++
++#include <mutex>
++
++namespace achievements::ra_account
++{
++
++namespace
++{
++
++struct Bridge
++{
++	std::mutex mutex;
++	bool imported = false;
++	bool managed = false;
++	bool suppressed = false;
++	// One pending password login, handed to rc_client exactly once.
++	bool pendingLogin = false;
++	// One token-rejection retry, answered exactly once. Never a loop.
++	bool tokenRetryAvailable = false;
++	bool tokenLoginAllowed = true;
++	std::string account;
++	std::string password;
++	long long revision = 0;
++	std::string markerPath;
++	std::string status;
++};
++
++Bridge& bridge()
++{
++	static Bridge instance;
++	return instance;
++}
++
++// Overwrite before releasing: the password should not outlive its single use
++// in a freed allocation.
++void wipe(std::string& secret)
++{
++	if (!secret.empty())
++		memset(&secret[0], 0, secret.size());
++	secret.clear();
++	secret.shrink_to_fit();
++}
++
++void setStatus(Bridge& b, const std::string& status) {
++	b.status = status;
++}
++
++// Both surfaces, deliberately. The achievement notifier can be missed while
++// the native menu is open, and the plan requires account failures to be
++// visible without relying on logs or optional achievement toasts.
++void report(const std::string& text, const std::string& detail = {})
++{
++	WARN_LOG(COMMON, "RA account: %s%s%s", text.c_str(),
++			detail.empty() ? "" : " - ", detail.c_str());
++	os_notify(text.c_str(), 5000, detail.empty() ? nullptr : detail.c_str());
++	notifier.notify(Notification::Error, "", text, detail);
++}
++
++std::string markerPath() {
++	return get_writable_config_path(MarkerFileName);
++}
++
++bool hostOverrideConfigured() {
++	return !config::AchievementsHostUrl.get().empty();
++}
++
++} // namespace
++
++void import()
++{
++	Bridge& b = bridge();
++	std::lock_guard<std::mutex> _(b.mutex);
++	if (b.imported)
++		return;
++	b.imported = true;
++
++	// Copy and scrub first, whatever the verdict turns out to be: nothing this
++	// process spawns afterwards can read the password out of its environment.
++	const std::map<std::string, std::string> env = collectEnv();
++	clearEnv();
++
++	if (get_writable_config_path("").empty()) {
++		// No configuration directory (onboarding): there is nowhere to put a
++		// marker or a token, so the snapshot is dropped rather than half-used.
++		WARN_LOG(COMMON, "RA account: no config directory, the Leaf account is not imported");
++		return;
++	}
++
++	const Snapshot snapshot = classify(env);
++	b.markerPath = markerPath();
++
++	Marker marker;
++	const MarkerStatus markerStatus = readMarker(b.markerPath, marker);
++	const Decision decision = decide(snapshot, markerStatus, marker,
++			config::AchievementsUserName.get(),
++			!config::AchievementsToken.get().empty());
++
++	if (snapshot.hasReason("stale-retroarch-credentials"))
++		// The producer failed to scrub RetroArch's own handoff. Report it:
++		// silently ignoring it would hide a real isolation bug.
++		WARN_LOG(COMMON, "RA account: RetroArch credential variables leaked into this launch");
++
++	switch (decision.action)
++	{
++	case Action::Unmanaged:
++		NOTICE_LOG(COMMON, "RA account: unmanaged launch (%s)", decision.reason.c_str());
++		return;
++
++	case Action::Idle:
++		NOTICE_LOG(COMMON, "RA account: nothing to import (%s)", decision.reason.c_str());
++		if (snapshot.handoff == Handoff::Malformed) {
++			setStatus(b, "handoff-" + decision.reason);
++			report(i18n::Ts("RetroAchievements: the Leaf account handoff was not usable"),
++					decision.reason);
++		}
++		return;
++
++	case Action::SuppressManaged:
++		// Managed state exists but this launch cannot justify using it.
++		// Nothing durable is erased: the account is repaired in Leaf, not here.
++		b.managed = true;
++		b.suppressed = true;
++		b.tokenLoginAllowed = false;
++		setStatus(b, decision.reason);
++		WARN_LOG(COMMON, "RA account: managed authentication suppressed (%s)",
++				decision.reason.c_str());
++		report(i18n::Ts("RetroAchievements: the Leaf account is unavailable this session"),
++				decision.reason);
++		return;
++
++	case Action::ReuseToken:
++		b.managed = true;
++		b.account = decision.account;
++		b.revision = decision.revision;
++		// Keep the password for the single retry the contract allows if the
++		// stored token turns out to be rejected or expired.
++		b.password = snapshot.password;
++		b.tokenRetryAvailable = true;
++		setStatus(b, "accepted");
++		config::EnableAchievements = true;
++		NOTICE_LOG(COMMON, "RA account: reusing the token for the imported account (revision %lld)",
++				decision.revision);
++		return;
++
++	case Action::SignOut:
++	{
++		b.managed = true;
++		b.tokenLoginAllowed = false;
++		// Clear first in memory so nothing can authenticate with the old
++		// account even if the writes below fail.
++		config::EnableAchievements = false;
++		config::AchievementsUserName = std::string();
++		config::AchievementsToken = std::string();
++		if (!config::saveKeysChecked({
++				{ "achievements", "Enabled", "no" },
++				{ "achievements", "UserName", "" },
++				{ "achievements", "Token", "" } }))
++		{
++			// Do not record the sign-out: the next launch must try again
++			// rather than believe a clear that never reached the card.
++			b.suppressed = true;
++			setStatus(b, "sign-out-save-failed");
++			report(i18n::Ts("RetroAchievements: could not clear the signed-out account"),
++					decision.reason);
++			return;
++		}
++		Marker signedOut;
++		signedOut.transition = Transition::SignedOut;
++		signedOut.revision = decision.revision;
++		if (!writeMarker(b.markerPath, signedOut)) {
++			b.suppressed = true;
++			setStatus(b, "sign-out-marker-failed");
++			report(i18n::Ts("RetroAchievements: could not record the signed-out account"),
++					decision.reason);
++			return;
++		}
++		setStatus(b, "signed-out");
++		NOTICE_LOG(COMMON, "RA account: signed out in Leaf (revision %lld)", decision.revision);
++		return;
++	}
++
++	case Action::ImportLogin:
++	{
++		b.managed = true;
++		b.account = decision.account;
++		b.revision = decision.revision;
++		b.tokenLoginAllowed = false;
++
++		if (hostOverrideConfigured()) {
++			// New or changed credentials are verified against the real
++			// RetroAchievements origin, never a custom or cached host. The
++			// proxy delivery owns the direct-bootstrap-then-switch flow; until
++			// it ships, a custom host means no managed import.
++			b.suppressed = true;
++			setStatus(b, "custom-host");
++			report(i18n::Ts("RetroAchievements: the Leaf account cannot be verified through a custom host"),
++					config::AchievementsHostUrl.get());
++			return;
++		}
++
++		Marker pending;
++		pending.transition = Transition::Pending;
++		pending.revision = decision.revision;
++		pending.account = decision.account;
++		if (!writeMarker(b.markerPath, pending)) {
++			// The old files stay exactly as they were, and this session runs
++			// without managed achievements.
++			b.suppressed = true;
++			setStatus(b, "pending-marker-failed");
++			report(i18n::Ts("RetroAchievements: could not prepare the Leaf account import"),
++					decision.reason);
++			return;
++		}
++
++		// The old token is now unusable: the marker is pending, so even a
++		// crash before acceptance cannot bring it back.
++		config::AchievementsToken = std::string();
++		config::AchievementsUserName = decision.account;
++		config::EnableAchievements = true;
++		b.password = snapshot.password;
++		b.pendingLogin = true;
++		setStatus(b, "pending");
++		NOTICE_LOG(COMMON, "RA account: importing the Leaf account (%s, revision %lld)",
++				decision.reason.c_str(), decision.revision);
++		return;
++	}
++	}
++}
++
++bool takePendingLogin(std::string& username, std::string& password)
++{
++	Bridge& b = bridge();
++	std::lock_guard<std::mutex> _(b.mutex);
++	if (!b.pendingLogin)
++		return false;
++	b.pendingLogin = false;
++	username = b.account;
++	password = b.password;
++	// The import login and the token retry are mutually exclusive: this is
++	// the first and only password attempt of the two.
++	b.tokenRetryAvailable = false;
++	wipe(b.password);
++	return true;
++}
++
++bool takeTokenRetry(std::string& username, std::string& password)
++{
++	Bridge& b = bridge();
++	std::lock_guard<std::mutex> _(b.mutex);
++	if (!b.tokenRetryAvailable)
++		return false;
++	b.tokenRetryAvailable = false;
++	username = b.account;
++	password = b.password;
++	wipe(b.password);
++	NOTICE_LOG(COMMON, "RA account: stored token rejected, retrying the native password login once");
++	return true;
++}
++
++bool isTokenLoginAllowed()
++{
++	Bridge& b = bridge();
++	std::lock_guard<std::mutex> _(b.mutex);
++	return b.tokenLoginAllowed;
++}
++
++bool commitLogin(const std::string& token)
++{
++	Bridge& b = bridge();
++	std::lock_guard<std::mutex> _(b.mutex);
++	if (!b.managed)
++		// An unmanaged login: upstream's own persistence applies.
++		return true;
++
++	config::AchievementsUserName = b.account;
++	config::AchievementsToken = token;
++	config::EnableAchievements = true;
++	// Only these three keys, and only in their global section: per-game
++	// choices, mappings, VMU slots and every other setting stay as they are.
++	if (!config::saveKeysChecked({
++			{ "achievements", "Enabled", "yes" },
++			{ "achievements", "UserName", b.account },
++			{ "achievements", "Token", token } }))
++	{
++		b.suppressed = true;
++		setStatus(b, "token-save-failed");
++		report(i18n::Ts("RetroAchievements: the account was verified but could not be saved"));
++		return false;
++	}
++
++	Marker accepted;
++	accepted.transition = Transition::Accepted;
++	accepted.revision = b.revision;
++	accepted.account = b.account;
++	if (!writeMarker(b.markerPath, accepted)) {
++		// Authenticated and persisted, but the revision is not accepted: the
++		// next launch imports again rather than trusting an unrecorded state.
++		setStatus(b, "accept-marker-failed");
++		report(i18n::Ts("RetroAchievements: the account will be imported again on the next launch"));
++		return true;
++	}
++	setStatus(b, "accepted");
++	wipe(b.password);
++	NOTICE_LOG(COMMON, "RA account: accepted revision %lld", b.revision);
++	return true;
++}
++
++void reportLoginFailure(const std::string& reason, const std::string& detail)
++{
++	Bridge& b = bridge();
++	std::lock_guard<std::mutex> _(b.mutex);
++	if (!b.managed)
++		return;
++	b.suppressed = true;
++	// Never fall back to the previous account: the marker stays pending and
++	// the in-memory token is already gone. Gameplay continues without
++	// achievements.
++	b.tokenRetryAvailable = false;
++	wipe(b.password);
++	setStatus(b, "login-failed");
++	report(i18n::Ts("RetroAchievements: could not sign in with the Leaf account"),
++			detail.empty() ? reason : detail);
++}
++
++bool isManaged()
++{
++	Bridge& b = bridge();
++	std::lock_guard<std::mutex> _(b.mutex);
++	return b.managed;
++}
++
++bool isSuppressed()
++{
++	Bridge& b = bridge();
++	std::lock_guard<std::mutex> _(b.mutex);
++	return b.suppressed;
++}
++
++std::string managedAccount()
++{
++	Bridge& b = bridge();
++	std::lock_guard<std::mutex> _(b.mutex);
++	return b.account;
++}
++
++std::string statusLine()
++{
++	Bridge& b = bridge();
++	std::lock_guard<std::mutex> _(b.mutex);
++	return b.status;
++}
++
++} // namespace achievements::ra_account
++
++#else // !USE_RACHIEVEMENTS
++
++namespace achievements::ra_account
++{
++
++void import() {
++	// No achievement support in this build: still scrub the snapshot, so a
++	// password cannot reach anything this process spawns.
++	clearEnv();
++}
++bool isManaged() { return false; }
++bool isSuppressed() { return false; }
++std::string statusLine() { return {}; }
++std::string managedAccount() { return {}; }
++
++} // namespace achievements::ra_account
++
++#endif
+diff --git a/core/achievements/ra_account_contract.cpp b/core/achievements/ra_account_contract.cpp
+new file mode 100644
+index 00000000..8b5e37cc
+--- /dev/null
++++ b/core/achievements/ra_account_contract.cpp
+@@ -0,0 +1,581 @@
++/*
++	UMRK: standalone-ra-account-v1 classifier, marker and transition rules.
++
++	Flycast is free software: you can redistribute it and/or modify
++	it under the terms of the GNU General Public License as published by
++	the Free Software Foundation, either version 2 of the License, or
++	(at your option) any later version.
++*/
++// No Flycast headers on purpose: scripts/ra-account-contract-test.sh compiles
++// this file on the host and replays the shared leaf-contracts fixtures against
++// classify(), so the emulator and the reference classifier cannot drift.
++#include "ra_account.h"
++
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <string>
++
++#ifdef _WIN32
++#include <io.h>
++#else
++#include <unistd.h>
++#endif
++
++namespace achievements::ra_account
++{
++
++namespace
++{
++
++const char *const kVersionVar  = "UMRK_RA_ACCOUNT_VERSION";
++const char *const kStateVar    = "UMRK_RA_ACCOUNT_STATE";
++const char *const kUsernameVar = "UMRK_RA_ACCOUNT_USERNAME";
++const char *const kPasswordVar = "UMRK_RA_ACCOUNT_PASSWORD";
++const char *const kRevisionVar = "UMRK_RA_ACCOUNT_REVISION";
++// RetroArch's own per-launch credential handoff. It has no business in a
++// standalone child; seeing it means an inherited value survived fork().
++const char *const kRetroArchUserVar = "JAWAKA_CHEEVOS_USERNAME";
++const char *const kRetroArchPassVar = "JAWAKA_CHEEVOS_PASSWORD";
++
++const char *const kEnvVars[] = {
++	kVersionVar, kStateVar, kUsernameVar, kPasswordVar, kRevisionVar,
++	kRetroArchUserVar, kRetroArchPassVar,
++};
++
++const char *const kContractPrefix = "UMRK_RA_ACCOUNT_";
++
++bool isValidUtf8(const std::string& value)
++{
++	const unsigned char *p = (const unsigned char *)value.data();
++	size_t remaining = value.size();
++	while (remaining > 0)
++	{
++		unsigned char lead = *p;
++		size_t length;
++		unsigned int codepoint;
++		if (lead < 0x80) {
++			length = 1;
++			codepoint = lead;
++		}
++		else if ((lead & 0xe0) == 0xc0) {
++			length = 2;
++			codepoint = lead & 0x1f;
++		}
++		else if ((lead & 0xf0) == 0xe0) {
++			length = 3;
++			codepoint = lead & 0x0f;
++		}
++		else if ((lead & 0xf8) == 0xf0) {
++			length = 4;
++			codepoint = lead & 0x07;
++		}
++		else
++			return false;
++		if (length > remaining)
++			return false;
++		for (size_t i = 1; i < length; i++)
++		{
++			if ((p[i] & 0xc0) != 0x80)
++				return false;
++			codepoint = (codepoint << 6) | (p[i] & 0x3f);
++		}
++		// Reject overlong encodings, UTF-16 surrogates and anything past the
++		// Unicode range, exactly as a strict decoder does.
++		static const unsigned int minCodepoint[5] = { 0, 0, 0x80, 0x800, 0x10000 };
++		if (codepoint < minCodepoint[length])
++			return false;
++		if (codepoint > 0x10ffff)
++			return false;
++		if (codepoint >= 0xd800 && codepoint <= 0xdfff)
++			return false;
++		p += length;
++		remaining -= length;
++	}
++	return true;
++}
++
++bool stateFromName(const std::string& name, State& out)
++{
++	if (name == "configured") {
++		out = State::Configured;
++		return true;
++	}
++	if (name == "never-configured") {
++		out = State::NeverConfigured;
++		return true;
++	}
++	if (name == "signed-out") {
++		out = State::SignedOut;
++		return true;
++	}
++	if (name == "invalid") {
++		out = State::Invalid;
++		return true;
++	}
++	if (name == "unreadable") {
++		out = State::Unreadable;
++		return true;
++	}
++	return false;
++}
++
++const char *transitionName(Transition transition)
++{
++	switch (transition)
++	{
++	case Transition::Pending:   return "pending";
++	case Transition::Accepted:  return "accepted";
++	case Transition::SignedOut: return "signed-out";
++	}
++	return "pending";
++}
++
++bool transitionFromName(const std::string& name, Transition& out)
++{
++	if (name == "pending") {
++		out = Transition::Pending;
++		return true;
++	}
++	if (name == "accepted") {
++		out = Transition::Accepted;
++		return true;
++	}
++	if (name == "signed-out") {
++		out = Transition::SignedOut;
++		return true;
++	}
++	return false;
++}
++
++// Strict ASCII decimal parse. `overflow` separates the contract's two
++// rejection rules: a non-positive or non-numeric revision is malformed, one
++// past the ceiling is the overflow the producer must refuse to write. Neither
++// is ever clamped into a usable value.
++bool parseRevision(const std::string& text, long long& out, bool& overflow)
++{
++	overflow = false;
++	out = 0;
++	if (text.empty())
++		return false;
++	long long value = 0;
++	for (char c : text)
++	{
++		if (c < '0' || c > '9')
++			return false;
++		if (value > (RevisionMax / 10) + 1) {
++			overflow = true;
++			return false;
++		}
++		value = value * 10 + (c - '0');
++		if (value > RevisionMax) {
++			overflow = true;
++			return false;
++		}
++	}
++	if (value < 1)
++		return false;
++	out = value;
++	return true;
++}
++
++bool lookup(const std::map<std::string, std::string>& env, const char *name,
++		std::string& out)
++{
++	auto it = env.find(name);
++	if (it == env.end())
++		return false;
++	out = it->second;
++	return true;
++}
++
++void checkCredential(const std::string& value, const char *what, size_t limit,
++		std::vector<std::string>& reasons)
++{
++	if (value.empty())
++		reasons.push_back("credential-empty");
++	if (value.size() > limit)
++		reasons.push_back(std::string(what) + "-oversized");
++	if (value.find('\0') != std::string::npos ||
++		value.find('\r') != std::string::npos ||
++		value.find('\n') != std::string::npos)
++		reasons.push_back("credential-control-character");
++	if (!isValidUtf8(value))
++		reasons.push_back("credential-invalid-utf8");
++}
++
++} // namespace
++
++bool Snapshot::hasReason(const std::string& reason) const
++{
++	for (const std::string& candidate : reasons)
++		if (candidate == reason)
++			return true;
++	return false;
++}
++
++std::string Snapshot::primaryReason() const {
++	return reasons.empty() ? std::string() : reasons.front();
++}
++
++Snapshot classify(const std::map<std::string, std::string>& env)
++{
++	Snapshot snapshot;
++
++	if (env.count(kRetroArchUserVar) != 0 || env.count(kRetroArchPassVar) != 0)
++		snapshot.reasons.push_back("stale-retroarch-credentials");
++
++	bool anyContractVar = false;
++	const size_t prefixLength = strlen(kContractPrefix);
++	for (const auto& [name, value] : env)
++	{
++		(void)value;
++		if (name.compare(0, prefixLength, kContractPrefix) == 0) {
++			anyContractVar = true;
++			break;
++		}
++	}
++	if (!anyContractVar) {
++		// Total absence is "no supported handoff". A partial snapshot is not.
++		snapshot.handoff = Handoff::None;
++		return snapshot;
++	}
++	snapshot.handoff = Handoff::Malformed;
++
++	std::string version;
++	if (!lookup(env, kVersionVar, version) || version != "1") {
++		snapshot.reasons.push_back("unsupported-version");
++		return snapshot;
++	}
++
++	std::string stateName;
++	if (!lookup(env, kStateVar, stateName)) {
++		snapshot.reasons.push_back("missing-account-state");
++		return snapshot;
++	}
++	State state;
++	if (!stateFromName(stateName, state)) {
++		snapshot.reasons.push_back("unknown-account-state");
++		return snapshot;
++	}
++	snapshot.state = state;
++
++	std::string username;
++	std::string password;
++	const bool hasUsername = lookup(env, kUsernameVar, username);
++	const bool hasPassword = lookup(env, kPasswordVar, password);
++
++	if (state != State::Configured && (hasUsername || hasPassword))
++		snapshot.reasons.push_back("credentials-unexpected");
++
++	if (state == State::Configured)
++	{
++		if (!hasUsername)
++			snapshot.reasons.push_back("username-missing");
++		if (!hasPassword)
++			snapshot.reasons.push_back("password-missing");
++		if (hasUsername)
++			checkCredential(username, "username", UsernameMaxBytes, snapshot.reasons);
++		if (hasPassword)
++			checkCredential(password, "password", PasswordMaxBytes, snapshot.reasons);
++	}
++
++	std::string revisionText;
++	const bool hasRevision = lookup(env, kRevisionVar, revisionText);
++	if (state == State::Configured || state == State::SignedOut)
++	{
++		if (!hasRevision)
++			snapshot.reasons.push_back("revision-missing");
++		else
++		{
++			long long revision = 0;
++			bool overflow = false;
++			if (parseRevision(revisionText, revision, overflow))
++				snapshot.revision = revision;
++			else
++				snapshot.reasons.push_back(overflow ? "revision-overflow"
++													: "revision-invalid");
++		}
++	}
++	else if (hasRevision)
++		snapshot.reasons.push_back("revision-unexpected");
++
++	if (snapshot.reasons.empty())
++	{
++		snapshot.handoff = Handoff::Valid;
++		if (state == State::Configured) {
++			snapshot.username = username;
++			snapshot.password = password;
++		}
++	}
++	else
++	{
++		// A rejected snapshot carries no credentials out of this function.
++		snapshot.revision = 0;
++	}
++	return snapshot;
++}
++
++std::map<std::string, std::string> collectEnv()
++{
++	std::map<std::string, std::string> env;
++	for (const char *name : kEnvVars)
++	{
++		const char *value = getenv(name);
++		if (value != nullptr)
++			env[name] = value;
++	}
++	return env;
++}
++
++void clearEnv()
++{
++	for (const char *name : kEnvVars)
++		unsetenv(name);
++}
++
++MarkerStatus readMarker(const std::string& path, Marker& out)
++{
++	FILE *f = fopen(path.c_str(), "rb");
++	if (f == nullptr)
++		return MarkerStatus::Absent;
++	std::string content;
++	char buffer[512];
++	size_t read;
++	bool tooLarge = false;
++	while ((read = fread(buffer, 1, sizeof(buffer), f)) > 0)
++	{
++		content.append(buffer, read);
++		if (content.size() > 4096) {
++			tooLarge = true;
++			break;
++		}
++	}
++	const bool failed = ferror(f) != 0;
++	fclose(f);
++	if (failed || tooLarge)
++		// An unreadable or absurd marker is managed state we cannot trust; it
++		// is malformed, never absent, so it can never look unmanaged.
++		return MarkerStatus::Malformed;
++
++	Marker marker;
++	bool haveHeader = false;
++	bool haveState = false;
++	bool haveRevision = false;
++	bool haveAccount = false;
++	size_t offset = 0;
++	while (offset <= content.size())
++	{
++		size_t end = content.find('\n', offset);
++		const bool last = end == std::string::npos;
++		std::string line = content.substr(offset, last ? std::string::npos : end - offset);
++		offset = last ? content.size() + 1 : end + 1;
++		if (!line.empty() && line.back() == '\r')
++			line.pop_back();
++		if (line.empty())
++			continue;
++		if (!haveHeader) {
++			if (line != std::string("umrk-ra-account 1"))
++				return MarkerStatus::Malformed;
++			haveHeader = true;
++			continue;
++		}
++		const size_t space = line.find(' ');
++		const std::string key = line.substr(0, space);
++		// The value runs to end of line: an account name may contain spaces.
++		const std::string value =
++			space == std::string::npos ? std::string() : line.substr(space + 1);
++		if (key == "state") {
++			if (haveState || !transitionFromName(value, marker.transition))
++				return MarkerStatus::Malformed;
++			haveState = true;
++		}
++		else if (key == "revision") {
++			if (haveRevision)
++				return MarkerStatus::Malformed;
++			if (value == "0")
++				marker.revision = 0;
++			else
++			{
++				bool overflow = false;
++				if (!parseRevision(value, marker.revision, overflow))
++					return MarkerStatus::Malformed;
++			}
++			haveRevision = true;
++		}
++		else if (key == "account") {
++			if (haveAccount)
++				return MarkerStatus::Malformed;
++			marker.account = value;
++			haveAccount = true;
++		}
++		else
++			// An unknown key means a marker written by something this build
++			// does not understand. Refuse it rather than acting on a subset.
++			return MarkerStatus::Malformed;
++	}
++	if (!haveHeader || !haveState || !haveRevision || !haveAccount)
++		return MarkerStatus::Malformed;
++	if (marker.revision == 0 && marker.transition != Transition::SignedOut)
++		// Only a sign-out that followed a never-configured handoff has no
++		// revision; anything else without one cannot justify a token.
++		return MarkerStatus::Malformed;
++	if (marker.account.find('\r') != std::string::npos ||
++		marker.account.find('\n') != std::string::npos)
++		return MarkerStatus::Malformed;
++	out = marker;
++	return MarkerStatus::Ok;
++}
++
++bool writeMarker(const std::string& path, const Marker& marker)
++{
++	if (marker.account.find('\n') != std::string::npos ||
++		marker.account.find('\r') != std::string::npos)
++		return false;
++
++	char revision[32];
++	snprintf(revision, sizeof(revision), "%lld", marker.revision);
++	std::string content = "umrk-ra-account 1\n";
++	content += "state ";
++	content += transitionName(marker.transition);
++	content += "\nrevision ";
++	content += revision;
++	content += "\naccount ";
++	content += marker.account;
++	content += "\n";
++
++	// Same directory, so the rename cannot cross a filesystem, and a failure
++	// anywhere below leaves the previous marker exactly as it was.
++	const std::string temporary = path + ".tmp";
++	FILE *f = fopen(temporary.c_str(), "wb");
++	if (f == nullptr)
++		return false;
++	bool ok = fwrite(content.data(), 1, content.size(), f) == content.size();
++	if (ok)
++		ok = fflush(f) == 0;
++#ifndef _WIN32
++	if (ok)
++		// FAT32 gives no ordering guarantee between the data and the rename,
++		// but flushing before it still turns the common "power lost during
++		// the write" case into "the previous marker survives".
++		ok = fsync(fileno(f)) == 0;
++#endif
++	if (fclose(f) != 0)
++		ok = false;
++	if (ok)
++		ok = rename(temporary.c_str(), path.c_str()) == 0;
++	if (!ok)
++		remove(temporary.c_str());
++	return ok;
++}
++
++Decision decide(const Snapshot& snapshot, MarkerStatus markerStatus,
++		const Marker& marker, const std::string& persistedAccount,
++		bool persistedTokenPresent)
++{
++	Decision decision;
++	const bool managedStateExists = markerStatus != MarkerStatus::Absent;
++
++	if (snapshot.handoff == Handoff::None)
++	{
++		// Not an authorized launch, or a launcher that predates the contract.
++		// With managed state on disk this must not quietly become an
++		// unmanaged session running the last imported token.
++		decision.action = managedStateExists ? Action::SuppressManaged : Action::Unmanaged;
++		decision.reason = managedStateExists ? "handoff-missing" : "unmanaged";
++		return decision;
++	}
++
++	if (snapshot.handoff == Handoff::Malformed)
++	{
++		decision.action = managedStateExists ? Action::SuppressManaged : Action::Idle;
++		decision.reason = snapshot.primaryReason();
++		return decision;
++	}
++
++	switch (snapshot.state)
++	{
++	case State::Configured:
++		decision.revision = snapshot.revision;
++		decision.account = snapshot.username;
++		if (markerStatus == MarkerStatus::Ok &&
++			marker.transition == Transition::Accepted &&
++			marker.revision == snapshot.revision &&
++			marker.account == snapshot.username &&
++			persistedAccount == snapshot.username &&
++			persistedTokenPresent)
++		{
++			// Marker, snapshot and Flycast's own persisted account all agree.
++			decision.action = Action::ReuseToken;
++			decision.reason = "token-reuse";
++		}
++		else
++		{
++			decision.action = Action::ImportLogin;
++			if (markerStatus == MarkerStatus::Absent)
++				decision.reason = "first-import";
++			else if (markerStatus == MarkerStatus::Malformed)
++				decision.reason = "marker-malformed";
++			else if (marker.transition == Transition::Pending)
++				decision.reason = "marker-pending";
++			else if (marker.account != snapshot.username)
++				decision.reason = "account-changed";
++			else if (marker.revision != snapshot.revision)
++				decision.reason = "revision-changed";
++			else if (!persistedTokenPresent)
++				decision.reason = "token-missing";
++			else
++				decision.reason = "account-mismatch";
++		}
++		return decision;
++
++	case State::SignedOut:
++		decision.revision = snapshot.revision;
++		if (markerStatus == MarkerStatus::Ok &&
++			marker.transition == Transition::SignedOut &&
++			marker.revision == snapshot.revision)
++		{
++			// Already committed. Re-clearing on every launch would fight a
++			// native account the user configured after signing out in Leaf.
++			decision.action = Action::Idle;
++			decision.reason = "signed-out";
++		}
++		else
++		{
++			decision.action = Action::SignOut;
++			decision.reason = "sign-out";
++		}
++		return decision;
++
++	case State::NeverConfigured:
++		if (!managedStateExists) {
++			// Nothing was ever imported: an independently configured native
++			// account is the user's own and stays untouched.
++			decision.action = Action::Unmanaged;
++			decision.reason = "never-configured";
++		}
++		else {
++			// The account rows are gone while managed state remains. Clear
++			// the managed credentials; revision 0 records that the sign-out
++			// carried none, and never matches a real revision.
++			decision.action = Action::SignOut;
++			decision.reason = "never-configured-managed";
++		}
++		return decision;
++
++	case State::Invalid:
++	case State::Unreadable:
++		// Not sign-out. Durable data survives for repair, and this session
++		// simply runs without managed authentication.
++		decision.action = managedStateExists ? Action::SuppressManaged : Action::Unmanaged;
++		decision.reason = snapshot.state == State::Invalid ? "account-invalid"
++														   : "account-unreadable";
++		return decision;
++	}
++
++	decision.action = Action::SuppressManaged;
++	decision.reason = "unknown-state";
++	return decision;
++}
++
++} // namespace achievements::ra_account
+diff --git a/core/cfg/cfg.cpp b/core/cfg/cfg.cpp
+index 55775828..32eb1b0e 100644
+--- a/core/cfg/cfg.cpp
++++ b/core/cfg/cfg.cpp
+@@ -1,7 +1,12 @@
+ #include "cfg.h"
+ #include "ini.h"
+ #include "stdclass.h"
++#include "oslib/directory.h"
++#include "nowide/cstdio.hpp"
+ #include <cerrno>
++#ifndef _WIN32
++#include <unistd.h>
++#endif
+ 
+ namespace config
+ {
+@@ -132,4 +137,49 @@ std::vector<std::string> getEntries(const std::string& section) {
+ 	return cfgdb.getEntryNames(section);
+ }
+ 
++bool saveKeysChecked(const std::vector<CheckedEntry>& entries)
++{
++	if (cfgPath.empty()) {
++		WARN_LOG(COMMON, "Error: no config path, cannot save %d checked entries",
++				(int)entries.size());
++		return false;
++	}
++	for (const CheckedEntry& entry : entries)
++		cfgdb.set(entry.section, entry.key, entry.value);
++
++	std::string data;
++	cfgdb.save(data);
++
++	// Plain stdio rather than hostfs: this path needs a checked flush, sync
++	// and close, which the storage abstraction does not expose. It is only
++	// ever reached from the Leaf account bridge, where the configuration
++	// directory is an ordinary filesystem path.
++	//
++	// Same directory, so the rename stays within one filesystem and either
++	// replaces the configuration whole or leaves the previous one untouched.
++	const std::string temporary = cfgPath + ".umrk-tmp";
++	FILE *file = nowide::fopen(temporary.c_str(), "wb");
++	if (file == nullptr) {
++		WARN_LOG(COMMON, "Error: Unable to open file '%s' for saving", temporary.c_str());
++		return false;
++	}
++	bool ok = fwrite(data.c_str(), 1, data.length(), file) == data.length();
++	if (ok)
++		ok = fflush(file) == 0;
++#ifndef _WIN32
++	if (ok)
++		ok = fsync(fileno(file)) == 0;
++#endif
++	if (fclose(file) != 0)
++		ok = false;
++	if (ok)
++		ok = flycast::rename(temporary.c_str(), cfgPath.c_str()) == 0;
++	if (!ok) {
++		WARN_LOG(COMMON, "Error: Failed to save the config file '%s'; the previous one is kept",
++				cfgPath.c_str());
++		flycast::unlink(temporary.c_str());
++	}
++	return ok;
++}
++
+ }	// namespace config
+diff --git a/core/cfg/cfg.h b/core/cfg/cfg.h
+index a20f0201..5c9ac048 100644
+--- a/core/cfg/cfg.h
++++ b/core/cfg/cfg.h
+@@ -20,6 +20,25 @@ void saveFloat(const std::string& section, const std::string& key, float value);
+ void setTransient(const std::string& section, const std::string& key, const std::string& value);
+ bool isTransient(const std::string& section, const std::string& key);
+ 
++// UMRK: one global key/value to write with saveKeysChecked().
++struct CheckedEntry
++{
++	std::string section;
++	std::string key;
++	std::string value;
++};
++
++// UMRK: set these keys in the GLOBAL sections and persist the configuration
++// once, through a same-directory temporary file and rename. Returns false
++// with the previous file intact and the in-memory values still set, so a
++// caller that must not act on an unpersisted change can report the failure.
++//
++// The ordinary save path truncates the file in place and reports nothing,
++// which loses the whole configuration when the card fills up or goes
++// read-only mid-write. This is the path the Leaf account bridge uses, where
++// "the token was written" has to actually mean it.
++bool saveKeysChecked(const std::vector<CheckedEntry>& entries);
++
+ void parseCommandLine(int argc, const char * const argv[]);
+ 
+ void setAutoSave(bool autoSave);
+diff --git a/core/nullDC.cpp b/core/nullDC.cpp
+index 280ba51e..47e017e3 100644
+--- a/core/nullDC.cpp
++++ b/core/nullDC.cpp
+@@ -18,6 +18,7 @@
+ #include "serialize.h"
+ #include "oslib/i18n.h"
+ #include "input/maplelink.h"
++#include "achievements/ra_account.h"
+ #include <time.h>
+ #ifdef TARGET_UWP
+ #include <winrt/Windows.System.h>
+@@ -101,6 +102,11 @@ int flycast_init(int argc, char* argv[])
+ 			config::Settings::instance().load(false);
+ 		}
+ 		i18n::reloadLanguage();
++		// UMRK: consume Leaf's standalone-ra-account-v1 handoff while the
++		// configuration is loaded and nothing has started the achievement
++		// client yet. It scrubs the snapshot from the environment and never
++		// touches the network.
++		achievements::ra_account::import();
+ 		gui_init();
+ 		os_CreateWindow();
+ 		os_SetupInput();
+diff --git a/core/ui/settings_general.cpp b/core/ui/settings_general.cpp
+index 8f3b8733..a4b43810 100644
+--- a/core/ui/settings_general.cpp
++++ b/core/ui/settings_general.cpp
+@@ -23,6 +23,7 @@
+ #include "oslib/storage.h"
+ #include "stdclass.h"
+ #include "achievements/achievements.h"
++#include "achievements/ra_account.h"
+ #include "imgui_stdlib.h"
+ 
+ static std::vector<std::string>* g_currentPathList = nullptr;
+@@ -412,9 +413,29 @@ void gui_settings_general()
+ 		ImGui::Indent();
+ 		OptionCheckbox(T("Hardcore Mode"), config::AchievementsHardcoreMode,
+ 				T("Enable RetroAchievements hardcore mode. Using cheats and loading a state are not allowed in this mode."));
++		// UMRK: when Leaf owns the account there is nothing to type here, and
++		// a native login or logout would silently replace the managed
++		// identity for one session. Show the account and where to change it.
++		const bool managedAccount = achievements::ra_account::isManaged();
+ 		InputText(T("Username"), &config::AchievementsUserName.get(),
+-				achievements::isLoggedOn() ? ImGuiInputTextFlags_ReadOnly : ImGuiInputTextFlags_None);
+-		if (config::EnableAchievements)
++				(achievements::isLoggedOn() || managedAccount) ? ImGuiInputTextFlags_ReadOnly : ImGuiInputTextFlags_None);
++		if (managedAccount)
++		{
++			ImGui::Text("%s", T("Account managed by Leaf"));
++			if (achievements::isLoggedOn())
++				ImGui::Text("%s", T("Authentication successful"));
++			else if (achievements::ra_account::isSuppressed())
++				ImGui::Text("%s", T("Not authenticated this session"));
++			else
++				ImGui::Text("%s", T("Authenticating..."));
++			const std::string accountStatus = achievements::ra_account::statusLine();
++			if (!accountStatus.empty())
++				ImGui::Text("%s: %s", T("Status"), accountStatus.c_str());
++			ImGui::TextWrapped("%s", T("Change or clear this account in Leaf's Settings > Games > Accounts. It applies the next time this emulator starts."));
++			if (config::EnableAchievements)
++				achievements::init();
++		}
++		else if (config::EnableAchievements)
+ 		{
+ 			static std::future<void> futureLogin;
+ 			achievements::init();

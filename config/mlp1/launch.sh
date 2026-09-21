@@ -25,6 +25,43 @@ log() { ( trap '' XFSZ; printf '%s\n' "$*" ) 2>/dev/null || true; }
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# standalone-ra-account-v1. Jawaka exports this child-only account snapshot to
+# an authorized emulator launch and to nothing else. Copy it into shell
+# variables and unset it before anything runs: every helper below (cp, sed,
+# sha256sum, awk, tr) inherits this process's environment, and the password
+# has no business in any of them. It is re-exported immediately before the
+# emulator exec, and never logged, never echoed, never put in argv.
+umrk_ra_set_version="${UMRK_RA_ACCOUNT_VERSION+1}"
+umrk_ra_set_state="${UMRK_RA_ACCOUNT_STATE+1}"
+umrk_ra_set_username="${UMRK_RA_ACCOUNT_USERNAME+1}"
+umrk_ra_set_password="${UMRK_RA_ACCOUNT_PASSWORD+1}"
+umrk_ra_set_revision="${UMRK_RA_ACCOUNT_REVISION+1}"
+umrk_ra_version="${UMRK_RA_ACCOUNT_VERSION-}"
+umrk_ra_state="${UMRK_RA_ACCOUNT_STATE-}"
+umrk_ra_username="${UMRK_RA_ACCOUNT_USERNAME-}"
+umrk_ra_password="${UMRK_RA_ACCOUNT_PASSWORD-}"
+umrk_ra_revision="${UMRK_RA_ACCOUNT_REVISION-}"
+unset UMRK_RA_ACCOUNT_VERSION UMRK_RA_ACCOUNT_STATE UMRK_RA_ACCOUNT_USERNAME \
+    UMRK_RA_ACCOUNT_PASSWORD UMRK_RA_ACCOUNT_REVISION
+
+restore_ra_account_snapshot() {
+    if [ -n "$umrk_ra_set_version" ]; then
+        export UMRK_RA_ACCOUNT_VERSION="$umrk_ra_version"
+    fi
+    if [ -n "$umrk_ra_set_state" ]; then
+        export UMRK_RA_ACCOUNT_STATE="$umrk_ra_state"
+    fi
+    if [ -n "$umrk_ra_set_username" ]; then
+        export UMRK_RA_ACCOUNT_USERNAME="$umrk_ra_username"
+    fi
+    if [ -n "$umrk_ra_set_password" ]; then
+        export UMRK_RA_ACCOUNT_PASSWORD="$umrk_ra_password"
+    fi
+    if [ -n "$umrk_ra_set_revision" ]; then
+        export UMRK_RA_ACCOUNT_REVISION="$umrk_ra_revision"
+    fi
+}
+
 if [ -n "${UMRK_ENV_FILE:-}" ] && [ -f "$UMRK_ENV_FILE" ]; then
     # shellcheck source=/dev/null
     . "$UMRK_ENV_FILE"
@@ -33,6 +70,11 @@ elif [ -n "${SDCARD_PATH:-}" ] && [ -n "${PLATFORM:-}" ] &&
     # shellcheck source=/dev/null
     . "$SDCARD_PATH/.system/leaf/platforms/$PLATFORM/launcher/env.sh"
 fi
+# The account snapshot is per-launch state from the daemon, never durable
+# environment. A value that appears here came from env.sh, which is exactly
+# where credentials must not be, so drop it instead of passing it on.
+unset UMRK_RA_ACCOUNT_VERSION UMRK_RA_ACCOUNT_STATE UMRK_RA_ACCOUNT_USERNAME \
+    UMRK_RA_ACCOUNT_PASSWORD UMRK_RA_ACCOUNT_REVISION
 
 if [ "$#" -ne 1 ]; then
     log "usage: $0 ROM"
@@ -322,6 +364,7 @@ if : >"$LOG_FILE" 2>/dev/null && leaf_log_probe >>"$LOG_FILE"; then
 else
     exec >/dev/null 2>&1
 fi
+restore_ra_account_snapshot
 exec "$ROOT_DIR/bin/flycast" \
     -config "$config_override" \
     "$ROM_PATH"

@@ -18,6 +18,7 @@ for path in \
     "$PACKAGE_DIR/defaults/emu.cfg" \
     "$PACKAGE_DIR/defaults/config.version" \
     "$PACKAGE_DIR/defaults/SDL_Loong Gamepad.cfg" \
+    "$PACKAGE_DIR/ra-account-v1" \
     "$PACKAGE_DIR/licenses/Flycast-GPL-2.0.txt" \
     "$PACKAGE_DIR/licenses/THIRD-PARTY-NOTICES.txt" \
     "$PACKAGE_DIR/provenance/build-manifest.json" \
@@ -43,6 +44,15 @@ if find "$PACKAGE_DIR" -type l -print -quit | grep -q .; then
 fi
 
 bash -n "$PACKAGE_DIR/launch.sh"
+
+# The capability record is what makes Jawaka willing to hand this payload the
+# account snapshot. Its content is exactly the contract id: a payload that
+# cannot consume the contract must not carry it.
+if [ "$(cat "$PACKAGE_DIR/ra-account-v1")" != "standalone-ra-account-v1" ]; then
+    echo "ra-account-v1 capability record does not name the contract" >&2
+    exit 1
+fi
+
 jq -e '
     .id == "flycast_standalone" and
     .platform == "mlp1" and
