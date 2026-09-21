@@ -22,6 +22,13 @@ export SOURCE_DATE_EPOCH
 
 mkdir -p "$BUILD_DIR" "$ARTIFACT_DIR/bin" "$ARTIFACT_DIR/provenance"
 
+# Build from scratch every time. cmake --fresh regenerates the build system but
+# leaves object files, so an earlier build with a different toolchain image can
+# be relinked into the distributable binary. That is not hypothetical: a stale
+# object compiled with the locally tagged image left a second GCC identifier in
+# .comment. A clean tree is what "two clean builds must match" means.
+rm -rf "$BUILD_DIR"
+
 # Flycast's ENABLE_LOG emits high-frequency SH4/REIOS debug events. On the
 # MLP1, redirecting that stream to the SD card is enough to disrupt audio.
 cmake -S "$SOURCE_DIR" -B "$BUILD_DIR" --fresh \
