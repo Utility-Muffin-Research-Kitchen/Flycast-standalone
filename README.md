@@ -53,6 +53,11 @@ directory, then passes storage, mapping, renderer, and orientation invariants
 through Flycast v2.7's native virtual-config options.
 The package manifest inventories and hashes every payload file.
 
+Each controller slot keeps one shared VMU (`vmu_save_A1.bin` and so on), as it
+did with v2.6. Flycast v2.7 defaults to a separate VMU per game, which would
+hide existing saves behind blank per-game cards, so the shipped config and the
+version 7 migration set `PerGameVmu = no` unless the player already chose.
+
 The canonical user-supplied files are `BIOS/dc/dc_boot.bin` (optional but
 recommended for Dreamcast), `BIOS/dc/awbios.zip`, `BIOS/dc/naomi.zip`, and
 `BIOS/dc/naomi2.zip`. Some Naomi games also require their named BIOS archive.
