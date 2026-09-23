@@ -22,9 +22,11 @@ mkdir -p "$BUILD_DIR"
     "$SOURCE_DIR/core/achievements/ra_route.cpp"
 "$BUILD_DIR/ra_route_test"
 
-# Request URLs from the pinned rcheevos for the session host.
+# Request URLs from the pinned rcheevos for the session host. gnu99, not c99:
+# rcheevos uses POSIX strdup/strncasecmp, which strict C99 hides on glibc.
+# No -Werror here: most of what this compiles is third-party rcheevos.
 RC_DIR="$SOURCE_DIR/core/deps/rcheevos"
-"${CC:-cc}" -std=c99 -Wall -Werror \
+"${CC:-cc}" -std=gnu99 \
     -I "$RC_DIR/include" -I "$RC_DIR/src" \
     -o "$BUILD_DIR/ra_route_urls_test" \
     "$ROOT_DIR/tests/ra_route_urls_test.c" \
