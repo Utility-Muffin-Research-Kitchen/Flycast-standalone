@@ -325,10 +325,10 @@ index 00000000..e5000cf7
 +} // namespace achievements::ra_account
 diff --git a/core/achievements/ra_account_bridge.cpp b/core/achievements/ra_account_bridge.cpp
 new file mode 100644
-index 00000000..e1a57c4e
+index 00000000..88e12362
 --- /dev/null
 +++ b/core/achievements/ra_account_bridge.cpp
-@@ -0,0 +1,408 @@
+@@ -0,0 +1,423 @@
 +/*
 +	UMRK: standalone-ra-account-v1 bridge between Leaf and Flycast's own
 +	RetroAchievements account.
@@ -584,6 +584,21 @@ index 00000000..e1a57c4e
 +		config::AchievementsToken = std::string();
 +		config::AchievementsUserName = decision.account;
 +		config::EnableAchievements = true;
++		// Persist them too. Emulator::loadGame() resets every option and
++		// reloads emu.cfg before the achievement client starts, so values
++		// held only in memory are gone by then: on a config that never
++		// enabled achievements, the import silently did nothing.
++		if (!config::saveKeysChecked({
++				{ "achievements", "Enabled", "yes" },
++				{ "achievements", "UserName", decision.account },
++				{ "achievements", "Token", "" } }))
++		{
++			b.suppressed = true;
++			setStatus(b, "pending-save-failed");
++			report(i18n::Ts("RetroAchievements: could not prepare the Leaf account import"),
++					decision.reason);
++			return;
++		}
 +		b.password = snapshot.password;
 +		b.pendingLogin = true;
 +		setStatus(b, "pending");
