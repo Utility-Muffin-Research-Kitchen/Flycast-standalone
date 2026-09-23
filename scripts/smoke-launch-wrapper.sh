@@ -33,7 +33,8 @@ set -euo pipefail
 for name in HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME \
     XDG_RUNTIME_DIR TMPDIR SDL_VIDEODRIVER SDL_AUDIODRIVER PULSE_SERVER \
     FLYCAST_UI_ROTATE_90 UMRK_RA_ACCOUNT_VERSION UMRK_RA_ACCOUNT_STATE \
-    UMRK_RA_ACCOUNT_USERNAME UMRK_RA_ACCOUNT_PASSWORD UMRK_RA_ACCOUNT_REVISION; do
+    UMRK_RA_ACCOUNT_USERNAME UMRK_RA_ACCOUNT_PASSWORD UMRK_RA_ACCOUNT_REVISION \
+    UMRK_FLYCAST_RA_ROUTE FLYCAST_PROBE FLYCAST_CONFIG_OVERRIDES; do
     printf '%s=<%s>\n' "$name" "${!name-}"
 done
 # RetroArch's handoff: whether each name is set at all, and its value.
@@ -61,6 +62,7 @@ run_wrapper() {
         LOGS_PATH="$LOGS_PATH_TEST" \
         UMRK_RUNTIME_PATH="$RUNTIME_PATH_TEST" \
         JAWAKA_RETROARCH_JOYPAD_INDEX=1 \
+        FLYCAST_PROBE=1 \
         FLYCAST_CONFIG_OVERRIDES='config:pvr.AutoSkipFrame=2' \
         "$PACKAGE_DIR/launch.sh" "$ROM_PATH"
 }
@@ -314,7 +316,8 @@ cat >"$SPY_DIR/sha256sum" <<EOF
 #!/usr/bin/env bash
 for name in UMRK_RA_ACCOUNT_VERSION UMRK_RA_ACCOUNT_STATE \\
     UMRK_RA_ACCOUNT_USERNAME UMRK_RA_ACCOUNT_PASSWORD UMRK_RA_ACCOUNT_REVISION \\
-    JAWAKA_CHEEVOS_USERNAME JAWAKA_CHEEVOS_PASSWORD JAWAKA_CHEEVOS_EXTRA; do
+    UMRK_FLYCAST_RA_ROUTE JAWAKA_CHEEVOS_USERNAME JAWAKA_CHEEVOS_PASSWORD \\
+    JAWAKA_CHEEVOS_EXTRA; do
     printf 'helper %s=<%s>\\n' "\$name" "\${!name-}" >>"$SPY_LOG"
 done
 exec "$REAL_SHA256SUM" "\$@"
@@ -346,6 +349,9 @@ run_wrapper_account() {
         JAWAKA_CHEEVOS_USERNAME=retroarch-user \
         JAWAKA_CHEEVOS_PASSWORD="$RETROARCH_PASSWORD" \
         JAWAKA_CHEEVOS_EXTRA="$RETROARCH_PASSWORD" \
+        UMRK_FLYCAST_RA_ROUTE=service-live \
+        FLYCAST_PROBE=1 \
+        FLYCAST_CONFIG_OVERRIDES='config:pvr.AutoSkipFrame=1,achievements:HostUrl=http://probe.invalid' \
         "$PACKAGE_DIR/launch.sh" "$ROM_PATH"
 }
 
@@ -364,6 +370,7 @@ if grep -v '=<>$' "$SPY_LOG" >/dev/null; then
 fi
 
 for expected in \
+    'UMRK_FLYCAST_RA_ROUTE=<service-live>' \
     'UMRK_RA_ACCOUNT_VERSION=<1>' \
     'UMRK_RA_ACCOUNT_STATE=<configured>' \
     "UMRK_RA_ACCOUNT_USERNAME=<$RA_USERNAME>" \
@@ -405,6 +412,21 @@ if grep -F "$RA_PASSWORD" "$LOG_FILE" | grep -v 'UMRK_RA_ACCOUNT_PASSWORD=<' >/d
     exit 1
 fi
 
+
+# A probe on a Leaf-managed launch cannot steer achievements: the whole
+# override string is ignored rather than partly applied.
+if grep -F 'probe.invalid' "$LOG_FILE" | grep -v 'FLYCAST_CONFIG_OVERRIDES=<' >/dev/null ||
+   grep -F 'config:pvr.AutoSkipFrame=1' "$LOG_FILE" | grep '^arg_' >/dev/null; then
+    echo "launch wrapper applied a probe override on a managed launch" >&2
+    exit 1
+fi
+grep -F 'a Leaf-managed launch cannot override achievement settings' "$WRAPPER_OUT" >/dev/null
+# The route intent is intent only, never argv.
+if grep -E '^arg_[0-9]+=.*(UMRK_FLYCAST_RA_ROUTE|service-live)' "$LOG_FILE" >/dev/null; then
+    echo "launch wrapper put the route intent in the emulator argv" >&2
+    exit 1
+fi
+
 # An unauthorized launch carries no snapshot, and the wrapper must not invent
 # one or leave a stale value behind.
 run_wrapper
@@ -422,6 +444,34 @@ for name in JAWAKA_CHEEVOS_USERNAME JAWAKA_CHEEVOS_PASSWORD; do
         exit 1
     fi
 done
+grep -F 'UMRK_FLYCAST_RA_ROUTE=<>' "$LOG_FILE" >/dev/null
+# The probe channel reaches Flycast only as -config, never as environment.
+grep -F 'FLYCAST_PROBE=<>' "$LOG_FILE" >/dev/null
+grep -F 'FLYCAST_CONFIG_OVERRIDES=<>' "$LOG_FILE" >/dev/null
+
+# Outside a developer probe the override channel is ignored entirely ...
+env -u UMRK_ENV_FILE \
+    PLATFORM=mlp1 SDCARD_PATH="$SDCARD_PATH_TEST" USERDATA_PATH="$USERDATA_PATH_TEST" \
+    BIOS_PATH="$BIOS_PATH_TEST" SAVES_PATH="$SAVES_PATH_TEST" STATES_PATH="$STATES_PATH_TEST" \
+    CHEATS_PATH="$CHEATS_PATH_TEST" LOGS_PATH="$LOGS_PATH_TEST" \
+    UMRK_RUNTIME_PATH="$RUNTIME_PATH_TEST" \
+    FLYCAST_CONFIG_OVERRIDES='config:pvr.AutoSkipFrame=3' \
+    "$PACKAGE_DIR/launch.sh" "$ROM_PATH" >"$WRAPPER_OUT" 2>&1
+if grep -F 'config:pvr.AutoSkipFrame=3' "$LOG_FILE" | grep '^arg_' >/dev/null; then
+    echo "launch wrapper applied FLYCAST_CONFIG_OVERRIDES outside a probe" >&2
+    exit 1
+fi
+grep -F 'ignoring FLYCAST_CONFIG_OVERRIDES outside a developer probe' "$WRAPPER_OUT" >/dev/null
+
+# ... while an unmanaged developer probe may still test achievement settings.
+env -u UMRK_ENV_FILE \
+    PLATFORM=mlp1 SDCARD_PATH="$SDCARD_PATH_TEST" USERDATA_PATH="$USERDATA_PATH_TEST" \
+    BIOS_PATH="$BIOS_PATH_TEST" SAVES_PATH="$SAVES_PATH_TEST" STATES_PATH="$STATES_PATH_TEST" \
+    CHEATS_PATH="$CHEATS_PATH_TEST" LOGS_PATH="$LOGS_PATH_TEST" \
+    UMRK_RUNTIME_PATH="$RUNTIME_PATH_TEST" \
+    FLYCAST_PROBE=1 FLYCAST_CONFIG_OVERRIDES='achievements:HostUrl=http://probe.invalid' \
+    "$PACKAGE_DIR/launch.sh" "$ROM_PATH"
+grep '^arg_1=' "$LOG_FILE" | grep -F 'achievements:HostUrl=http://probe.invalid' >/dev/null
 
 # env.sh is durable environment, never a credential source: a value that shows
 # up there is dropped rather than handed to the emulator.
@@ -434,6 +484,7 @@ export UMRK_RA_ACCOUNT_PASSWORD=from-env-sh
 export UMRK_RA_ACCOUNT_REVISION=9
 export JAWAKA_CHEEVOS_USERNAME=from-env-sh
 export JAWAKA_CHEEVOS_PASSWORD=from-env-sh
+export UMRK_FLYCAST_RA_ROUTE=service-live
 EOF
 env -u UMRK_RA_ACCOUNT_VERSION -u UMRK_RA_ACCOUNT_STATE \
     -u UMRK_RA_ACCOUNT_USERNAME -u UMRK_RA_ACCOUNT_PASSWORD \
@@ -454,5 +505,6 @@ if grep -F 'from-env-sh' "$LOG_FILE" >/dev/null; then
     exit 1
 fi
 grep -F 'JAWAKA_CHEEVOS_PASSWORD[]=<>' "$LOG_FILE" >/dev/null
+grep -F 'UMRK_FLYCAST_RA_ROUTE=<>' "$LOG_FILE" >/dev/null
 
-printf 'Verified launch wrapper paths, quoting, seed policy, account handoff, RetroArch credential scrub, and user-config preservation\n'
+printf 'Verified launch wrapper paths, quoting, seed policy, account and route handoff, RetroArch credential scrub, probe override policy, and user-config preservation\n'

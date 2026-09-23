@@ -77,6 +77,11 @@ jobs:
       - name: Complete source archive and offline payload reproduction
         run: make test-dist-source
 
+      # Patch 0003's route policy, bounded health check against a fake
+      # service, and the rcheevos request URLs for the session host.
+      - name: Session route checks
+        run: make ra-route-test
+
       - name: Show the locked binary identity
         run: |
           binary=output/mlp1/build/bin/flycast

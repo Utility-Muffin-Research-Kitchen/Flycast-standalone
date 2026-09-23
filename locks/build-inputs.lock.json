@@ -164,6 +164,10 @@
       {
         "path": "patches/0002-mlp1-ra-account-import.patch",
         "sha256": "392cba90961cf4e8e390e7d7d69fa62dac6b45e98f5a864a1692cfe86d804fa2"
+      },
+      {
+        "path": "patches/0003-mlp1-ra-route.patch",
+        "sha256": "f7055aab693918df1592a8c610d03557ee28d26d8a02f80fc3f69161248c6589"
       }
     ]
   }

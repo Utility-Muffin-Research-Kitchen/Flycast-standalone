@@ -62,6 +62,15 @@ scrub_retroarch_credentials() {
 }
 scrub_retroarch_credentials
 
+# UMRK_FLYCAST_RA_ROUTE: the launcher's child-only RAOfflineProxy service
+# intent, handled like the account snapshot: kept aside, hidden from every
+# helper, restored only for the emulator exec. Flycast validates the value
+# itself, so an unknown value still reaches it as invalid rather than
+# silently turning into "no handoff".
+umrk_route_set="${UMRK_FLYCAST_RA_ROUTE+1}"
+umrk_route="${UMRK_FLYCAST_RA_ROUTE-}"
+unset UMRK_FLYCAST_RA_ROUTE
+
 restore_ra_account_snapshot() {
     if [ -n "$umrk_ra_set_version" ]; then
         export UMRK_RA_ACCOUNT_VERSION="$umrk_ra_version"
@@ -84,6 +93,9 @@ restore_ra_account_snapshot() {
     if [ -n "$umrk_stale_ra_password" ]; then
         export JAWAKA_CHEEVOS_PASSWORD=""
     fi
+    if [ -n "$umrk_route_set" ]; then
+        export UMRK_FLYCAST_RA_ROUTE="$umrk_route"
+    fi
 }
 
 if [ -n "${UMRK_ENV_FILE:-}" ] && [ -f "$UMRK_ENV_FILE" ]; then
@@ -97,9 +109,9 @@ fi
 # The account snapshot is per-launch state from the daemon, never durable
 # environment. A value that appears here came from env.sh, which is exactly
 # where credentials must not be, so drop it instead of passing it on. The same
-# goes for RetroArch's credential handoff.
+# goes for the route intent and RetroArch's credential handoff.
 unset UMRK_RA_ACCOUNT_VERSION UMRK_RA_ACCOUNT_STATE UMRK_RA_ACCOUNT_USERNAME \
-    UMRK_RA_ACCOUNT_PASSWORD UMRK_RA_ACCOUNT_REVISION
+    UMRK_RA_ACCOUNT_PASSWORD UMRK_RA_ACCOUNT_REVISION UMRK_FLYCAST_RA_ROUTE
 scrub_retroarch_credentials
 if [ -n "$umrk_stale_ra_username$umrk_stale_ra_password" ]; then
     log "RetroArch achievement credentials were set for this launch; dropped"
@@ -377,12 +389,25 @@ elif [ -n "${JAWAKA_RETROARCH_JOYPAD_INDEX:-}" ]; then
     append_override "input:maple_sdl_joystick_${JAWAKA_RETROARCH_JOYPAD_INDEX}=0"
 fi
 
+# FLYCAST_CONFIG_OVERRIDES belongs to explicit developer probes
+# (scripts/probe-port-mlp1.sh sets FLYCAST_PROBE=1); a normal launch ignores
+# it. A Leaf-managed launch never lets it steer achievements: an override of
+# the host, Hardcore or the account would bypass the session route.
 if [ "${FLYCAST_PROBE:-0}" = "1" ]; then
     append_override "config:rend.ShowFPS=yes"
+    if [ -n "${FLYCAST_CONFIG_OVERRIDES:-}" ]; then
+        if [ -n "$umrk_ra_set_version$umrk_route_set" ] &&
+                printf ',%s' "$FLYCAST_CONFIG_OVERRIDES" |
+                    grep -Eqi ',[[:space:]]*achievements:'; then
+            log "ignoring FLYCAST_CONFIG_OVERRIDES: a Leaf-managed launch cannot override achievement settings"
+        else
+            append_override "$FLYCAST_CONFIG_OVERRIDES"
+        fi
+    fi
+elif [ -n "${FLYCAST_CONFIG_OVERRIDES:-}" ]; then
+    log "ignoring FLYCAST_CONFIG_OVERRIDES outside a developer probe"
 fi
-if [ -n "${FLYCAST_CONFIG_OVERRIDES:-}" ]; then
-    append_override "$FLYCAST_CONFIG_OVERRIDES"
-fi
+unset FLYCAST_PROBE FLYCAST_CONFIG_OVERRIDES
 
 cd "$ROOT_DIR"
 # LOG-SAFE-1. The Flycast log lives on the same FAT card as the session log, so

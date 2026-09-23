@@ -1,0 +1,1077 @@
+diff --git a/core/achievements/CMakeLists.txt b/core/achievements/CMakeLists.txt
+index 62cfa317..adafffdc 100644
+--- a/core/achievements/CMakeLists.txt
++++ b/core/achievements/CMakeLists.txt
+@@ -3,4 +3,6 @@ target_sources(${PROJECT_NAME} PRIVATE
+         achievements.h
+         ra_account.h
+         ra_account_bridge.cpp
+-        ra_account_contract.cpp)
++        ra_account_contract.cpp
++        ra_route.cpp
++        ra_route.h)
+diff --git a/core/achievements/achievements.cpp b/core/achievements/achievements.cpp
+index 5420783e..a53f2899 100644
+--- a/core/achievements/achievements.cpp
++++ b/core/achievements/achievements.cpp
+@@ -20,6 +20,7 @@
+ #include "achievements.h"
+ #include "serialize.h"
+ #include "ra_account.h"
++#include "ra_route.h"
+ #ifdef USE_RACHIEVEMENTS
+ #include "oslib/directory.h"
+ #include "oslib/http_client.h"
+@@ -40,6 +41,7 @@
+ #include <utility>
+ #include <xxhash.h>
+ #include <functional>
++#include <strings.h>
+ #include "util/worker_thread.h"
+ #include "util/periodic_thread.h"
+ 
+@@ -66,6 +68,16 @@ public:
+ 	static Achievements& Instance();
+ 	void setHostOverride(const std::string& host);
+ 
++	// UMRK: Leaf session route (patch 0003).
++	void setRouteIntent(ra_route::Intent intent) { routeIntent = intent; }
++	RoutePrep prepareSessionRoute();
++	bool checkRouteService();
++	void beginProxySession();
++	void playDirect();
++	SessionLogin sessionLoginState() const { return sessionLogin; }
++	void releaseGameLoad() { holdGameLoad = false; }
++	std::string routeStatusLine();
++
+ private:
+ 	bool createClient();
+ 	std::string getGameHash();
+@@ -86,6 +98,17 @@ private:
+ 	// UMRK: the imported Leaf account authenticates through the same native
+ 	// password flow, but persists through the account bridge.
+ 	static void clientManagedLoginCallback(int result, const char *error_message, rc_client_t *client, void *userdata);
++	// UMRK: a proxy session verifies new credentials directly, then signs
++	// in on the session host with the accepted token.
++	static void clientBootstrapLoginCallback(int result, const char *error_message, rc_client_t *client, void *userdata);
++	static void clientSessionLoginCallback(int result, const char *error_message, rc_client_t *client, void *userdata);
++	bool routeHandoff() const { return routeIntent != ra_route::Intent::Absent; }
++	bool accountUsable();
++	void resolveRouteWithoutPrompt();
++	void startProxyLogin();
++	void startSessionTokenLogin();
++	void sessionFailed(const std::string& detail);
++	void setRouteStatus(const std::string& status);
+ 	void authenticationSuccess(const rc_client_user_t *user);
+ 	static void clientMessageCallback(const char *message, const rc_client_t *client);
+ 	static u32 clientReadMemory(u32 address, u8 *buffer, u32 num_bytes, rc_client_t *client);
+@@ -111,6 +134,16 @@ private:
+ 	rc_client_t *rc_client = nullptr;
+ 	bool loggedOn = false;
+ 	bool hostOverrideActive = false;
++	// UMRK: Leaf session route. The session host is never written to
++	// config::AchievementsHostUrl; it lives only in rcheevos for this run.
++	ra_route::Intent routeIntent = ra_route::Intent::Absent;
++	std::atomic_bool routeResolved {false};
++	ra_route::Route route = ra_route::Route::Direct;
++	std::atomic_bool proxySession {false};
++	std::atomic_bool holdGameLoad {false};
++	std::atomic<SessionLogin> sessionLogin {SessionLogin::Idle};
++	std::mutex routeMutex;
++	std::string routeStatus;
+ 	std::atomic_bool loadingGame {};
+ 	bool active = false;
+ 	bool paused = false;
+@@ -166,6 +199,31 @@ void setHostOverride(const std::string& host) {
+ 	Achievements::Instance().setHostOverride(host);
+ }
+ 
++void setRouteIntent(int intent) {
++	Achievements::Instance().setRouteIntent((ra_route::Intent)intent);
++}
++RoutePrep prepareSessionRoute() {
++	return Achievements::Instance().prepareSessionRoute();
++}
++bool checkRouteService() {
++	return Achievements::Instance().checkRouteService();
++}
++void beginProxySession() {
++	Achievements::Instance().beginProxySession();
++}
++void playDirect() {
++	Achievements::Instance().playDirect();
++}
++SessionLogin sessionLoginState() {
++	return Achievements::Instance().sessionLoginState();
++}
++void releaseGameLoad() {
++	Achievements::Instance().releaseGameLoad();
++}
++std::string routeStatusLine() {
++	return Achievements::Instance().routeStatusLine();
++}
++
+ void serialize(Serializer& ser) {
+ 	Achievements::Instance().serialize(ser);
+ }
+@@ -214,6 +272,12 @@ bool Achievements::init()
+ 	if (rc_client != nullptr)
+ 		return true;
+ 
++	// UMRK: a Leaf-routed launch picks its host only after the content and
++	// its per-game settings are loaded. Until then nothing may create the
++	// client or start a login (the settings page calls init() every frame).
++	if (routeHandoff() && !routeResolved)
++		return false;
++
+ 	if (!createClient())
+ 		return false;
+ 
+@@ -225,6 +289,12 @@ bool Achievements::init()
+ 	//rc_client_set_spectator_mode_enabled(rc_client, 0);
+ 	loadCache();
+ 
++	if (proxySession)
++	{
++		startProxyLogin();
++		return true;
++	}
++
+ 	// UMRK: an imported Leaf account authenticates with its password through
+ 	// the native flow. ra_account::import() has already invalidated any old
+ 	// managed token, so there is nothing here to fall back to.
+@@ -266,7 +336,15 @@ bool Achievements::createClient()
+ 
+ 	rc_client_set_userdata(rc_client, this);
+ 
+-	if (!config::AchievementsHostUrl.get().empty()) {
++	if (routeHandoff() && route != ra_route::Route::CustomHost)
++	{
++		// UMRK: Leaf-routed session. Direct means the real origin even when a
++		// custom host is saved (Hardcore); the proxy host is applied by the
++		// login flow. Neither touches the saved HostUrl.
++		rc_client_set_host(rc_client, nullptr);
++		hostOverrideActive = false;
++	}
++	else if (!config::AchievementsHostUrl.get().empty()) {
+ 		rc_client_set_host(rc_client, config::AchievementsHostUrl.get().c_str());
+ 		hostOverrideActive = true;
+ 	}
+@@ -408,7 +486,9 @@ void Achievements::authenticationSuccess(const rc_client_user_t *user)
+ 		});
+ 	}
+ 	loggedOn = true;
+-	if (!settings.content.fileName.empty()) // TODO better test?
++	// UMRK: a proxy session signs in before the game starts; the game's
++	// achievement set loads at Event::Start, not from the prompt.
++	if (!settings.content.fileName.empty() && !holdGameLoad) // TODO better test?
+ 		loadGame();
+ }
+ 
+@@ -462,6 +542,229 @@ void Achievements::clientManagedLoginCallback(int result, const char *error_mess
+ 	achievements->authenticationSuccess(user);
+ }
+ 
++// UMRK: Leaf session route (patch 0003) ---------------------------------
++
++void Achievements::setRouteStatus(const std::string& status)
++{
++	std::lock_guard<std::mutex> _(routeMutex);
++	routeStatus = status;
++}
++
++std::string Achievements::routeStatusLine()
++{
++	std::lock_guard<std::mutex> _(routeMutex);
++	return routeStatus;
++}
++
++bool Achievements::accountUsable()
++{
++	if (ra_account::isManaged())
++		return !ra_account::isSuppressed()
++			&& (ra_account::hasPendingLogin()
++				|| (ra_account::isTokenLoginAllowed()
++					&& !config::AchievementsUserName.get().empty()
++					&& !config::AchievementsToken.get().empty()));
++	return !config::AchievementsUserName.get().empty() && !config::AchievementsToken.get().empty();
++}
++
++// Called by the GUI once the content is mounted and its per-game settings
++// are loaded, before Event::Start. Every route except the Leaf proxy is
++// decided here without waiting.
++RoutePrep Achievements::prepareSessionRoute()
++{
++	proxySession = false;
++	sessionLogin = SessionLogin::Idle;
++	setRouteStatus({});
++	routeResolved = false;
++	if (!routeHandoff())
++	{
++		// Not a Leaf-routed launch: upstream behavior, unchanged.
++		routeResolved = true;
++		return RoutePrep::Start;
++	}
++	ra_route::Inputs in;
++	in.intent = routeIntent;
++	in.enabled = config::EnableAchievements && !settings.naomi.slave;
++	// Effective Hardcore, after the per-game load (Emulator::loadGame).
++	in.hardcore = settings.raHardcoreMode;
++	in.customHost = !config::AchievementsHostUrl.get().empty();
++	in.accountUsable = accountUsable();
++	const ra_route::Decision d = ra_route::decide(in);
++	NOTICE_LOG(COMMON, "RA route: %s (%s, intent %s)", ra_route::routeName(d.route), d.reason,
++			ra_route::intentName(routeIntent));
++	if (d.customHostIgnoredForHardcore)
++		notifier.notify(Notification::Error, "", i18n::Ts("Hardcore uses RetroAchievements directly"),
++				i18n::Ts("Your custom achievements host is not used this session. It stays saved."));
++	if (d.route == ra_route::Route::ProxyCheck)
++		return RoutePrep::CheckService;
++	route = d.route;
++	if (d.route == ra_route::Route::Direct && routeIntent == ra_route::Intent::ServiceLive)
++		setRouteStatus(i18n::Ts("Signed in to RetroAchievements directly. Unlocks will not be queued."));
++	routeResolved = true;
++	return RoutePrep::Start;
++}
++
++bool Achievements::checkRouteService()
++{
++	const ra_route::Health h = ra_route::checkHealth(ra_route::kHealthAddress, ra_route::kHealthPort,
++			ra_route::kHealthPath, ra_route::kHealthBudgetMs);
++	NOTICE_LOG(COMMON, "RA route: Leaf offline service %s", ra_route::healthName(h));
++	return h == ra_route::Health::Ready;
++}
++
++void Achievements::beginProxySession()
++{
++	route = ra_route::Route::ProxyCheck;
++	proxySession = true;
++	holdGameLoad = true;
++	sessionLogin = SessionLogin::InProgress;
++	routeResolved = true;
++	setRouteStatus(i18n::Ts("Signing in through Leaf's offline service"));
++	if (!init())
++		sessionFailed(i18n::Ts("The achievement client could not start"));
++}
++
++void Achievements::playDirect()
++{
++	route = ra_route::Route::Direct;
++	proxySession = false;
++	routeResolved = true;
++	NOTICE_LOG(COMMON, "RA route: direct (play anyway)");
++	setRouteStatus(i18n::Ts("Signed in to RetroAchievements directly. Unlocks will not be queued."));
++}
++
++// Event::Start reached without the GUI's pre-start step: decide now,
++// without a prompt. A ready service is still used; anything else is direct.
++void Achievements::resolveRouteWithoutPrompt()
++{
++	if (prepareSessionRoute() != RoutePrep::CheckService)
++		return;
++	if (checkRouteService())
++	{
++		route = ra_route::Route::ProxyCheck;
++		proxySession = true;
++		sessionLogin = SessionLogin::InProgress;
++		routeResolved = true;
++	}
++	else
++		playDirect();
++}
++
++void Achievements::sessionFailed(const std::string& detail)
++{
++	sessionLogin = SessionLogin::Failed;
++	setRouteStatus(i18n::Ts("Achievements unavailable. Unlocks will not be queued."));
++	WARN_LOG(COMMON, "RA route: session sign-in failed: %s", detail.c_str());
++	notifier.notify(Notification::Error, "", i18n::Ts("Achievements unavailable. Unlocks will not be queued."), detail);
++}
++
++void Achievements::startProxyLogin()
++{
++	std::string user;
++	std::string password;
++	if (ra_account::takePendingLogin(user, password))
++	{
++		// New or changed Leaf credentials are verified against the real
++		// origin first: the proxy's login cache is keyed by username only
++		// and cannot vouch for a password.
++		rc_client_set_host(rc_client, nullptr);
++		hostOverrideActive = false;
++		rc_client_begin_login_with_password(rc_client, user.c_str(), password.c_str(),
++				clientBootstrapLoginCallback, nullptr);
++		password.assign(password.size(), '\0');
++	}
++	else if ((!ra_account::isManaged() || ra_account::isTokenLoginAllowed())
++			&& !config::AchievementsUserName.get().empty() && !config::AchievementsToken.get().empty())
++		startSessionTokenLogin();
++	else
++		sessionFailed(i18n::Ts("No usable RetroAchievements account"));
++}
++
++void Achievements::startSessionTokenLogin()
++{
++	rc_client_set_host(rc_client, ra_route::kSessionHost);
++	hostOverrideActive = true;
++	rc_client_set_hardcore_enabled(rc_client, 0);
++	rc_client_begin_login_with_token(rc_client, config::AchievementsUserName.get().c_str(),
++			config::AchievementsToken.get().c_str(), clientSessionLoginCallback, nullptr);
++}
++
++void Achievements::clientBootstrapLoginCallback(int result, const char *error_message, rc_client_t *client,
++                                                void *userdata)
++{
++	Achievements *achievements = (Achievements *)rc_client_get_userdata(client);
++	if (result != RC_OK)
++	{
++		ra_account::reportLoginFailure(rc_error_str(result), error_message != nullptr ? error_message : "");
++		achievements->sessionFailed(error_message != nullptr ? error_message : rc_error_str(result));
++		return;
++	}
++	const rc_client_user_t *user = rc_client_get_user_info(client);
++	if (user == nullptr || user->token == nullptr)
++	{
++		ra_account::reportLoginFailure("no-user-token", "");
++		achievements->sessionFailed(i18n::Ts("No user token returned"));
++		return;
++	}
++	// Persists the verified token and accepts the revision (checked save,
++	// then the accepted marker).
++	if (!ra_account::commitLogin(user->token))
++	{
++		achievements->sessionFailed(i18n::Ts("The verified account could not be saved"));
++		return;
++	}
++	// Finish this request before moving the client, and rcheevos' global
++	// host, to the session host: the move runs after this callback returns.
++	achievements->asyncTask([achievements]() {
++		rc_client_logout(achievements->rc_client);
++		achievements->startSessionTokenLogin();
++	});
++}
++
++void Achievements::clientSessionLoginCallback(int result, const char *error_message, rc_client_t *client,
++                                              void *userdata)
++{
++	Achievements *achievements = (Achievements *)rc_client_get_userdata(client);
++	if (result != RC_OK)
++	{
++		WARN_LOG(COMMON, "RA route: session login failed: %s", error_message != nullptr ? error_message : "");
++		// A rejected managed token gets its one password retry, verified
++		// directly like any new credentials.
++		std::string user;
++		std::string password;
++		if (ra_account::takeTokenRetry(user, password))
++		{
++			achievements->asyncTask([achievements, user, password]() mutable {
++				rc_client_set_host(achievements->rc_client, nullptr);
++				achievements->hostOverrideActive = false;
++				rc_client_begin_login_with_password(achievements->rc_client, user.c_str(), password.c_str(),
++						clientBootstrapLoginCallback, nullptr);
++				password.assign(password.size(), '\0');
++			});
++			return;
++		}
++		// The account stays valid; only this session is without achievements.
++		achievements->sessionFailed(error_message != nullptr ? error_message : rc_error_str(result));
++		return;
++	}
++	const rc_client_user_t *user = rc_client_get_user_info(client);
++	if (user == nullptr || user->username == nullptr)
++	{
++		achievements->sessionFailed(i18n::Ts("No user returned"));
++		return;
++	}
++	// The session must be the account Leaf accepted, never another one.
++	if (ra_account::isManaged() && strcasecmp(user->username, ra_account::managedAccount().c_str()) != 0)
++	{
++		rc_client_logout(client);
++		achievements->sessionFailed(i18n::Ts("The session signed in as a different account"));
++		return;
++	}
++	achievements->sessionLogin = SessionLogin::Ready;
++	achievements->setRouteStatus(i18n::Ts("Signed in through Leaf's offline service"));
++	achievements->authenticationSuccess(user);
++}
++
+ std::future<void> Achievements::login(const char* username, const char* password)
+ {
+ 	init();
+@@ -644,10 +947,14 @@ void Achievements::clientEventHandler(const rc_client_event_t* event, rc_client_
+ 
+ 	case RC_CLIENT_EVENT_DISCONNECTED:
+ 		notifyError(i18n::Ts("RetroAchievements disconnected"));
++		if (achievements->proxySession)
++			achievements->setRouteStatus(i18n::Ts("Leaf's offline service is unreachable. Unlocks are not being queued."));
+ 		break;
+ 
+ 	case RC_CLIENT_EVENT_RECONNECTED:
+ 		notifyError(i18n::Ts("RetroAchievements reconnected"));
++		if (achievements->proxySession && achievements->active)
++			achievements->setRouteStatus(i18n::Ts("Leaf is queuing unlocks earned while offline"));
+ 		break;
+ 
+ 	default:
+@@ -893,6 +1200,8 @@ void Achievements::resumeGame()
+ 	if (config::EnableAchievements && !settings.naomi.slave)
+ 	{
+ 		idleThread.stop();
++		if (routeHandoff() && !routeResolved)
++			resolveRouteWithoutPrompt();
+ 		loadGame();
+ 		if (settings.raHardcoreMode && !config::AchievementsHardcoreMode)
+ 		{
+@@ -980,6 +1289,8 @@ void Achievements::gameLoaded(int result, const char *errorMessage)
+ 			WARN_LOG(COMMON, "RA Loading game failed: %s", errorMessage);
+ 		settings.raHardcoreMode = false;
+ 		loadingGame = false;
++		if (proxySession)
++			setRouteStatus(i18n::Ts("Achievements unavailable. Unlocks will not be queued."));
+ 		return;
+ 	}
+ 	const rc_client_game_t* info = rc_client_get_game_info(rc_client);
+@@ -992,6 +1303,8 @@ void Achievements::gameLoaded(int result, const char *errorMessage)
+ 	}
+ 	active = true;
+ 	loadingGame = false;
++	if (proxySession)
++		setRouteStatus(i18n::Ts("Leaf is queuing unlocks earned while offline"));
+ 	EventManager::listen(Event::VBlank, emuEventCallback, this);
+ 	NOTICE_LOG(COMMON, "RA: game %d loaded: %s, achievements %d leaderboards %d rich presence %d", info->id, info->title,
+ 			rc_client_has_achievements(rc_client), rc_client_has_leaderboards(rc_client), rc_client_has_rich_presence(rc_client));
+diff --git a/core/achievements/achievements.h b/core/achievements/achievements.h
+index ced0969f..29009663 100644
+--- a/core/achievements/achievements.h
++++ b/core/achievements/achievements.h
+@@ -56,6 +56,23 @@ std::vector<Achievement> getAchievementList();
+ bool canPause();
+ void setHostOverride(const std::string& host);
+ 
++// UMRK: per-session routing for Leaf-managed launches (patch 0003). The
++// route is decided once the content and its per-game settings are loaded,
++// before the game starts; nothing authenticates earlier.
++enum class RoutePrep { Start, CheckService };
++enum class SessionLogin { Idle, InProgress, Ready, Failed };
++void setRouteIntent(int intent);
++RoutePrep prepareSessionRoute();
++// The bounded readiness check of Leaf's offline service; blocks at most
++// 500 ms, so the GUI runs it off its own thread.
++bool checkRouteService();
++void beginProxySession();
++// Play Anyway: RetroAchievements directly, nothing queued offline.
++void playDirect();
++SessionLogin sessionLoginState();
++void releaseGameLoad();
++std::string routeStatusLine();
++
+ #else
+ 
+ static inline bool isActive() {
+diff --git a/core/achievements/ra_account.h b/core/achievements/ra_account.h
+index e5000cf7..2a90bdf8 100644
+--- a/core/achievements/ra_account.h
++++ b/core/achievements/ra_account.h
+@@ -191,6 +191,8 @@ bool takeTokenRetry(std::string& username, std::string& password);
+ // False when a stored token must not be used this session (a suppressed
+ // handoff, a sign-out, or an import whose login has not succeeded yet).
+ bool isTokenLoginAllowed();
++// A verified-but-not-yet-attempted import is waiting (patch 0003 routes it).
++bool hasPendingLogin();
+ // Persist a verified token and accept its revision. Returns false when the
+ // configuration could not be saved, in which case nothing was accepted and
+ // the failure has already been reported.
+diff --git a/core/achievements/ra_account_bridge.cpp b/core/achievements/ra_account_bridge.cpp
+index 88e12362..36a40fe9 100644
+--- a/core/achievements/ra_account_bridge.cpp
++++ b/core/achievements/ra_account_bridge.cpp
+@@ -373,6 +373,13 @@ void reportLoginFailure(const std::string& reason, const std::string& detail)
+ 			detail.empty() ? reason : detail);
+ }
+ 
++bool hasPendingLogin()
++{
++	Bridge& b = bridge();
++	std::lock_guard<std::mutex> _(b.mutex);
++	return b.pendingLogin;
++}
++
+ bool isManaged()
+ {
+ 	Bridge& b = bridge();
+diff --git a/core/achievements/ra_route.cpp b/core/achievements/ra_route.cpp
+new file mode 100644
+index 00000000..cf01ee00
+--- /dev/null
++++ b/core/achievements/ra_route.cpp
+@@ -0,0 +1,274 @@
++/*
++	UMRK: per-session RetroAchievements routing for Leaf-managed launches.
++
++	Flycast is free software: you can redistribute it and/or modify
++	it under the terms of the GNU General Public License as published by
++	the Free Software Foundation, either version 2 of the License, or
++	(at your option) any later version.
++*/
++#include "ra_route.h"
++
++#include <arpa/inet.h>
++#include <cerrno>
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <fcntl.h>
++#include <netinet/in.h>
++#include <poll.h>
++#include <sys/socket.h>
++#include <unistd.h>
++
++namespace achievements::ra_route
++{
++
++Intent parseIntent(const char *value)
++{
++	if (value == nullptr)
++		return Intent::Absent;
++	if (std::strcmp(value, "service-live") == 0)
++		return Intent::ServiceLive;
++	if (std::strcmp(value, "native") == 0)
++		return Intent::Native;
++	return Intent::Invalid;
++}
++
++Intent consumeHandoff()
++{
++	Intent intent = parseIntent(std::getenv(kEnv));
++	unsetenv(kEnv);
++	return intent;
++}
++
++const char *intentName(Intent intent)
++{
++	switch (intent)
++	{
++	case Intent::Absent: return "absent";
++	case Intent::Native: return "native";
++	case Intent::ServiceLive: return "service-live";
++	case Intent::Invalid: return "invalid";
++	}
++	return "invalid";
++}
++
++Decision decide(const Inputs& in)
++{
++	Decision d;
++	if (!in.settingsKnown) {
++		d.route = Route::NoAuth;
++		d.reason = "settings-unknown";
++		return d;
++	}
++	if (!in.enabled) {
++		d.route = Route::NoAuth;
++		d.reason = "disabled";
++		return d;
++	}
++	if (!in.accountUsable) {
++		d.route = Route::NoAuth;
++		d.reason = "no-account";
++		return d;
++	}
++	if (in.hardcore) {
++		d.route = Route::Direct;
++		d.customHostIgnoredForHardcore = in.customHost;
++		d.reason = "hardcore";
++		return d;
++	}
++	if (in.customHost) {
++		d.route = Route::CustomHost;
++		d.reason = "custom-host";
++		return d;
++	}
++	if (in.intent != Intent::ServiceLive) {
++		d.route = Route::Direct;
++		d.reason = in.intent == Intent::Native ? "service-not-live"
++				: in.intent == Intent::Invalid ? "invalid-intent" : "no-handoff";
++		return d;
++	}
++	d.route = Route::ProxyCheck;
++	d.reason = "service-live";
++	return d;
++}
++
++const char *routeName(Route route)
++{
++	switch (route)
++	{
++	case Route::NoAuth: return "none";
++	case Route::Direct: return "direct";
++	case Route::CustomHost: return "custom-host";
++	case Route::ProxyCheck: return "leaf-proxy";
++	}
++	return "none";
++}
++
++namespace {
++
++long long nowMs()
++{
++	return std::chrono::duration_cast<std::chrono::milliseconds>(
++			std::chrono::steady_clock::now().time_since_epoch()).count();
++}
++
++// 1 ready, 0 deadline, -1 error.
++int waitFd(int fd, short events, long long deadline)
++{
++	for (;;)
++	{
++		long long remaining = deadline - nowMs();
++		if (remaining <= 0)
++			return 0;
++		pollfd pfd{ fd, events, 0 };
++		int rc = poll(&pfd, 1, (int)remaining);
++		if (rc > 0)
++			return 1;
++		if (rc == 0)
++			return 0;
++		if (errno != EINTR)
++			return -1;
++	}
++}
++
++bool contains(const std::string& haystack, const char *needle)
++{
++	return haystack.find(needle) != std::string::npos;
++}
++
++} // namespace
++
++bool healthResponseReady(const std::string& response)
++{
++	// The status line comes first; a 200 anywhere else, or any redirect, is
++	// not an answer from the health endpoint.
++	if (response.compare(0, 13, "HTTP/1.0 200 ") != 0
++			&& response.compare(0, 13, "HTTP/1.1 200 ") != 0)
++		return false;
++	size_t body = response.find("\r\n\r\n");
++	if (body == std::string::npos)
++		return false;
++	std::string doc;
++	for (size_t i = body + 4; i < response.size(); i++)
++		if (response[i] != ' ' && response[i] != '\t' && response[i] != '\r' && response[i] != '\n')
++			doc += response[i];
++	return contains(doc, "\"service\":\"org.umrk.raofflineproxy\"")
++			&& contains(doc, "\"protocol\":\"leaf-health-1\"")
++			&& contains(doc, "\"ready\":true");
++}
++
++Health checkHealth(const char *address, int port, const char *path, int budgetMs)
++{
++	if (address == nullptr || path == nullptr || budgetMs <= 0)
++		return Health::Unreachable;
++	const long long deadline = nowMs() + budgetMs;
++
++	sockaddr_in addr{};
++	addr.sin_family = AF_INET;
++	addr.sin_port = htons((uint16_t)port);
++	if (inet_pton(AF_INET, address, &addr.sin_addr) != 1)
++		return Health::Unreachable;
++
++	int fd = socket(AF_INET, SOCK_STREAM, 0);
++	if (fd < 0)
++		return Health::Unreachable;
++	int flags = fcntl(fd, F_GETFL, 0);
++	if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
++		close(fd);
++		return Health::Unreachable;
++	}
++	(void)fcntl(fd, F_SETFD, FD_CLOEXEC);
++#if defined(SO_NOSIGPIPE)
++	int one = 1;
++	(void)setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
++#endif
++
++	Health result = Health::Unreachable;
++	std::string response;
++	char request[192];
++	int requestLen;
++	int w;
++	int rc = connect(fd, (sockaddr *)&addr, sizeof(addr));
++	if (rc != 0 && errno != EINPROGRESS)
++		goto out;
++	if (rc != 0)
++	{
++		w = waitFd(fd, POLLOUT, deadline);
++		if (w != 1) {
++			result = w == 0 ? Health::Timeout : Health::Unreachable;
++			goto out;
++		}
++		int soError = 0;
++		socklen_t len = sizeof(soError);
++		if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &soError, &len) != 0 || soError != 0)
++			goto out;
++	}
++
++	requestLen = std::snprintf(request, sizeof(request),
++			"GET %s HTTP/1.0\r\nHost: %s:%d\r\nConnection: close\r\n\r\n", path, address, port);
++	if (requestLen <= 0 || requestLen >= (int)sizeof(request))
++		goto out;
++	for (int sent = 0; sent < requestLen; )
++	{
++		w = waitFd(fd, POLLOUT, deadline);
++		if (w != 1) {
++			result = w == 0 ? Health::Timeout : Health::Unreachable;
++			goto out;
++		}
++#if defined(MSG_NOSIGNAL)
++		ssize_t n = send(fd, request + sent, requestLen - sent, MSG_NOSIGNAL);
++#else
++		ssize_t n = send(fd, request + sent, requestLen - sent, 0);
++#endif
++		if (n < 0) {
++			if (errno == EINTR || errno == EAGAIN)
++				continue;
++			goto out;
++		}
++		sent += (int)n;
++	}
++
++	for (;;)
++	{
++		w = waitFd(fd, POLLIN, deadline);
++		if (w != 1) {
++			result = w == 0 ? Health::Timeout : Health::Unreachable;
++			goto out;
++		}
++		char buf[1024];
++		ssize_t n = recv(fd, buf, sizeof(buf), 0);
++		if (n < 0) {
++			if (errno == EINTR || errno == EAGAIN)
++				continue;
++			goto out;
++		}
++		if (n == 0)
++			break;
++		response.append(buf, (size_t)n);
++		if (response.size() > kHealthMaxResponse) {
++			// Not the tiny health document.
++			result = Health::NotReady;
++			goto out;
++		}
++	}
++	result = healthResponseReady(response) ? Health::Ready : Health::NotReady;
++
++out:
++	close(fd);
++	return result;
++}
++
++const char *healthName(Health health)
++{
++	switch (health)
++	{
++	case Health::Ready: return "ready";
++	case Health::NotReady: return "not-ready";
++	case Health::Unreachable: return "unreachable";
++	case Health::Timeout: return "timeout";
++	}
++	return "unreachable";
++}
++
++} // namespace achievements::ra_route
+diff --git a/core/achievements/ra_route.h b/core/achievements/ra_route.h
+new file mode 100644
+index 00000000..88b8a501
+--- /dev/null
++++ b/core/achievements/ra_route.h
+@@ -0,0 +1,99 @@
++/*
++	UMRK: per-session RetroAchievements routing for Leaf-managed launches.
++
++	Flycast is free software: you can redistribute it and/or modify
++	it under the terms of the GNU General Public License as published by
++	the Free Software Foundation, either version 2 of the License, or
++	(at your option) any later version.
++*/
++// No Flycast headers on purpose: scripts/ra-route-test.sh compiles this pair
++// on the host, so the route policy and the health check are tested as the
++// device runs them.
++#pragma once
++#include <string>
++
++namespace achievements::ra_route
++{
++
++// Private child-only handoff from Leaf's launcher: whether the supervised
++// RAOfflineProxy service may be used for this launch. It never carries a
++// URL, port or credential, and never says the game is eligible.
++constexpr const char *kEnv = "UMRK_FLYCAST_RA_ROUTE";
++
++// The only host a Leaf proxy session ever uses, and the fixed readiness
++// endpoint behind it. Neither comes from the handoff or any response.
++constexpr const char *kSessionHost = "http://127.0.0.1:8080";
++constexpr const char *kHealthAddress = "127.0.0.1";
++constexpr int kHealthPort = 8080;
++constexpr const char *kHealthPath = "/leaf/health";
++constexpr int kHealthBudgetMs = 500;
++constexpr size_t kHealthMaxResponse = 4096;
++
++enum class Intent
++{
++	Absent,       // no handoff: not a Leaf-routed launch, upstream behavior
++	Native,       // Leaf says no live service
++	ServiceLive,  // Leaf's supervised service is running or starting
++	Invalid,      // present but unrecognized: never opts into the proxy
++};
++
++Intent parseIntent(const char *value);
++// Reads the handoff once and removes it from the environment, so no helper
++// or child inherits it.
++Intent consumeHandoff();
++const char *intentName(Intent intent);
++
++enum class Route
++{
++	NoAuth,      // no authentication this session; gameplay continues
++	Direct,      // the real RetroAchievements origin
++	CustomHost,  // the user's own configured host, as upstream routes it
++	ProxyCheck,  // Leaf's proxy, once the readiness check passes
++};
++
++// The effective settings after account import and per-game loading.
++struct Inputs
++{
++	Intent intent = Intent::Absent;
++	bool settingsKnown = true;
++	bool enabled = false;
++	bool accountUsable = false;
++	bool hardcore = false;
++	bool customHost = false;
++};
++
++struct Decision
++{
++	Route route = Route::NoAuth;
++	// Hardcore always goes direct; a configured custom host is then unused
++	// for this session and the player is told so. The saved host is kept.
++	bool customHostIgnoredForHardcore = false;
++	const char *reason = "";
++};
++
++// The proxy plan's precedence table, first match wins:
++//   settings unknown -> NoAuth; disabled or no account -> NoAuth;
++//   Hardcore -> Direct; custom host -> CustomHost;
++//   intent other than ServiceLive -> Direct; otherwise ProxyCheck.
++Decision decide(const Inputs& in);
++const char *routeName(Route route);
++
++enum class Health
++{
++	Ready,
++	NotReady,     // answered, but not the ready health document
++	Unreachable,  // refused or failed before an answer
++	Timeout,      // the total budget ran out
++};
++
++// One bounded GET of kHealthPath: a single total deadline covering connect,
++// send and receive, no redirects (a 3xx is simply not ready), a capped
++// response, and no host or port taken from anything the reply says.
++Health checkHealth(const char *address, int port, const char *path, int budgetMs);
++// The acceptance rule on its own, for tests: the status line must be the
++// first line and 200, and the body must carry the service, protocol and
++// ready fields of the Leaf health document.
++bool healthResponseReady(const std::string& response);
++const char *healthName(Health health);
++
++} // namespace achievements::ra_route
+diff --git a/core/nullDC.cpp b/core/nullDC.cpp
+index 47e017e3..22a47895 100644
+--- a/core/nullDC.cpp
++++ b/core/nullDC.cpp
+@@ -19,6 +19,8 @@
+ #include "oslib/i18n.h"
+ #include "input/maplelink.h"
+ #include "achievements/ra_account.h"
++#include "achievements/ra_route.h"
++#include "achievements/achievements.h"
+ #include <time.h>
+ #ifdef TARGET_UWP
+ #include <winrt/Windows.System.h>
+@@ -107,6 +109,15 @@ int flycast_init(int argc, char* argv[])
+ 		// client yet. It scrubs the snapshot from the environment and never
+ 		// touches the network.
+ 		achievements::ra_account::import();
++		// UMRK: the route intent is child-only too; read it and scrub it.
++		{
++			const auto routeIntent = achievements::ra_route::consumeHandoff();
++#ifdef USE_RACHIEVEMENTS
++			achievements::setRouteIntent((int)routeIntent);
++#else
++			(void)routeIntent;
++#endif
++		}
+ 		gui_init();
+ 		os_CreateWindow();
+ 		os_SetupInput();
+diff --git a/core/ui/gui.cpp b/core/ui/gui.cpp
+index cb77cbe3..6d16c1f4 100644
+--- a/core/ui/gui.cpp
++++ b/core/ui/gui.cpp
+@@ -1281,6 +1281,13 @@ static void gui_display_loadscreen()
+ 				}
+ 				else
+ 				{
++#ifdef USE_RACHIEVEMENTS
++					// UMRK: the content and its per-game settings are loaded;
++					// decide the achievement route before the game starts.
++					if (achievements::prepareSessionRoute() == achievements::RoutePrep::CheckService)
++						gui_setState(GuiState::AchievementsRoute);
++					else
++#endif
+ 					gui_setState(GuiState::Closed);
+ 					ImGui::Text("%s", label);
+ 				}
+@@ -1333,6 +1340,104 @@ static void gui_display_loadscreen()
+     ImGui::End();
+ }
+ 
++#ifdef USE_RACHIEVEMENTS
++// UMRK: Leaf's offline achievements service, checked after the content is
++// loaded and before the game starts. Checking and signing in never leave a
++// blank screen: this window is up the whole time, and the player can always
++// start without waiting.
++static void gui_achievements_route()
++{
++	enum class Phase { Check, Checking, NotReady, SigningIn, Unavailable };
++	static Phase phase = Phase::Check;
++	static std::future<bool> check;
++
++	const auto startGame = []() {
++		achievements::releaseGameLoad();
++		phase = Phase::Check;
++		gui_setState(GuiState::Closed);
++	};
++
++	drawBoxartBackground();
++	centerNextWindow();
++	ImGui::SetNextWindowSize(ScaledVec2(400, 0));
++	ImGui::SetNextWindowBgAlpha(0.8f);
++	ImguiStyleVar _1(ImGuiStyleVar_WindowPadding, ScaledVec2(20, 20));
++
++	if (ImGui::Begin("##raroute", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize))
++	{
++		ImguiStyleVar _(ImGuiStyleVar_FramePadding, ScaledVec2(20, 10));
++		switch (phase)
++		{
++		case Phase::Check:
++			check = std::async(std::launch::async, achievements::checkRouteService);
++			phase = Phase::Checking;
++			[[fallthrough]];
++		case Phase::Checking:
++			ImGui::TextWrapped("%s", T("Checking Leaf's offline achievements service..."));
++			if (check.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
++			{
++				if (check.get()) {
++					achievements::beginProxySession();
++					phase = Phase::SigningIn;
++				}
++				else
++					phase = Phase::NotReady;
++			}
++			break;
++
++		case Phase::NotReady:
++			ImGui::TextWrapped("%s", T("Leaf's offline achievements service is not ready."));
++			ImGui::Spacing();
++			ImGui::TextWrapped("%s", T("Play Anyway signs in to RetroAchievements directly. Unlocks earned while offline cannot be queued this session."));
++			ImGui::Spacing();
++			if (ImGui::Button(T("Retry")))
++				phase = Phase::Check;
++			ImGui::SameLine();
++			if (ImGui::Button(T("Cancel")))
++			{
++				phase = Phase::Check;
++				gui_stop_game();
++			}
++			ImGui::SameLine();
++			if (ImGui::Button(T("Play Anyway")))
++			{
++				achievements::playDirect();
++				startGame();
++			}
++			break;
++
++		case Phase::SigningIn:
++			ImGui::TextWrapped("%s", T("Signing in to RetroAchievements..."));
++			switch (achievements::sessionLoginState())
++			{
++			case achievements::SessionLogin::Ready:
++				startGame();
++				break;
++			case achievements::SessionLogin::Failed:
++				phase = Phase::Unavailable;
++				break;
++			default:
++				ImGui::Spacing();
++				if (ImGui::Button(T("Play Now")))
++					startGame();
++				break;
++			}
++			break;
++
++		case Phase::Unavailable:
++			ImGui::TextWrapped("%s", T("Achievements unavailable. Unlocks will not be queued."));
++			ImGui::Spacing();
++			ImGui::TextWrapped("%s", T("You can play normally. Achievements try again the next time this game starts."));
++			ImGui::Spacing();
++			if (ImGui::Button(T("Play")))
++				startGame();
++			break;
++		}
++	}
++	ImGui::End();
++}
++#endif
++
+ void gui_display_ui()
+ {
+ 	FC_PROFILE_SCOPE;
+@@ -1400,6 +1505,11 @@ void gui_display_ui()
+ 	case GuiState::NetworkStart:
+ 		gui_network_start();
+ 		break;
++	case GuiState::AchievementsRoute:
++#ifdef USE_RACHIEVEMENTS
++		gui_achievements_route();
++#endif
++		break;
+ 	case GuiState::Cheats:
+ 		gui_cheats();
+ 		break;
+diff --git a/core/ui/gui.h b/core/ui/gui.h
+index e5b897fd..3f2e41ec 100644
+--- a/core/ui/gui.h
++++ b/core/ui/gui.h
+@@ -68,6 +68,7 @@ enum class GuiState {
+ 	SelectDisk,
+ 	Loading,
+ 	NetworkStart,
++	AchievementsRoute,	// UMRK: Leaf offline-service readiness before start
+ 	Cheats,
+ 	Achievements,
+ };
+diff --git a/core/ui/settings_general.cpp b/core/ui/settings_general.cpp
+index a4b43810..0a89e7ed 100644
+--- a/core/ui/settings_general.cpp
++++ b/core/ui/settings_general.cpp
+@@ -416,6 +416,10 @@ void gui_settings_general()
+ 		// UMRK: when Leaf owns the account there is nothing to type here, and
+ 		// a native login or logout would silently replace the managed
+ 		// identity for one session. Show the account and where to change it.
++		// UMRK: how this session reaches RetroAchievements, when Leaf routed it.
++		const std::string routeStatus = achievements::routeStatusLine();
++		if (!routeStatus.empty())
++			ImGui::TextWrapped("%s", routeStatus.c_str());
+ 		const bool managedAccount = achievements::ra_account::isManaged();
+ 		InputText(T("Username"), &config::AchievementsUserName.get(),
+ 				(achievements::isLoggedOn() || managedAccount) ? ImGuiInputTextFlags_ReadOnly : ImGuiInputTextFlags_None);
