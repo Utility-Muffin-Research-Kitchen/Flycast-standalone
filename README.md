@@ -149,6 +149,16 @@ native menu.
 Dreamcast defaults to VGA output; Flycast falls back to composite for software
 that does not support VGA.
 
+`make verify-mlp1` checks the binary on the host only. To also check its
+shared-library resolution on a device, opt in with `VERIFY_ON_DEVICE=1`. The
+check pushes the binary to `/tmp` on `ADB_SERIAL`, or on the first online adb
+device when `ADB_SERIAL` is unset, runs it with `LD_TRACE_LOADED_OBJECTS=1`,
+and removes it:
+
+```sh
+make verify-mlp1 VERIFY_ON_DEVICE=1 ADB_SERIAL=<serial>
+```
+
 Useful narrow checks:
 
 ```sh
@@ -156,6 +166,7 @@ make smoke-launch-wrapper
 make verify-package-mlp1
 make build-lock-test
 make package-version-test
+make device-check-optin-test
 ```
 
 No BIOS or game content is included.
