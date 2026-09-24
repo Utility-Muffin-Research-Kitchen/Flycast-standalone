@@ -5,7 +5,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOURCE_DIR="$ROOT_DIR/workdir/mlp1/flycast"
+SOURCE_DIR="${FLYCAST_SOURCE_DIR:-$ROOT_DIR/workdir/mlp1/flycast}"
 BUILD_DIR="$ROOT_DIR/output/host-tests"
 CXX="${CXX:-c++}"
 
@@ -21,6 +21,27 @@ mkdir -p "$BUILD_DIR"
     "$ROOT_DIR/tests/ra_route_test.cpp" \
     "$SOURCE_DIR/core/achievements/ra_route.cpp"
 "$BUILD_DIR/ra_route_test"
+
+# The unit test above proves decide() answers NoAuth when the settings are not
+# known. That rule only means something if the emulator feeds it: the input
+# must come from the configuration store's own verdict on emu.cfg
+# (config::isEstablished(), exercised against real unreadable files by
+# ra-account-fault-test), and an unknown configuration must stop the client
+# before any login. Check the patched source says exactly that.
+ACHIEVEMENTS_SOURCE="$SOURCE_DIR/core/achievements/achievements.cpp"
+for wiring in \
+    'in.settingsKnown = config::isEstablished();' \
+    'if (routeHandoff() && !config::isEstablished())'; do
+    if ! grep -F "$wiring" "$ACHIEVEMENTS_SOURCE" >/dev/null; then
+        echo "FAIL route wiring: achievements.cpp lacks: $wiring" >&2
+        exit 1
+    fi
+done
+if [ "$(grep -c 'settingsKnown' "$ACHIEVEMENTS_SOURCE")" -ne 2 ]; then
+    echo "FAIL route wiring: settingsKnown must be set once and reported once" >&2
+    exit 1
+fi
+echo "route wiring: settingsKnown comes from the configuration store"
 
 # Request URLs from the pinned rcheevos for the session host. gnu99, not c99:
 # rcheevos uses POSIX strdup/strncasecmp, which strict C99 hides on glibc.

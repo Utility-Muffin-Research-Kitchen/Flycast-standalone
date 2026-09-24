@@ -11,7 +11,7 @@ index 62cfa317..adafffdc 100644
 +        ra_route.cpp
 +        ra_route.h)
 diff --git a/core/achievements/achievements.cpp b/core/achievements/achievements.cpp
-index 5420783e..1a68485d 100644
+index 5420783e..e23a20c3 100644
 --- a/core/achievements/achievements.cpp
 +++ b/core/achievements/achievements.cpp
 @@ -20,6 +20,7 @@
@@ -22,7 +22,15 @@ index 5420783e..1a68485d 100644
  #ifdef USE_RACHIEVEMENTS
  #include "oslib/directory.h"
  #include "oslib/http_client.h"
-@@ -40,6 +41,7 @@
+@@ -27,6 +28,7 @@
+ #include "ui/gui_achievements.h"
+ #include "imgread/common.h"
+ #include "cfg/option.h"
++#include "cfg/cfg.h"
+ #include "oslib/oslib.h"
+ #include "emulator.h"
+ #include "stdclass.h"
+@@ -40,6 +42,7 @@
  #include <utility>
  #include <xxhash.h>
  #include <functional>
@@ -30,7 +38,7 @@ index 5420783e..1a68485d 100644
  #include "util/worker_thread.h"
  #include "util/periodic_thread.h"
  
-@@ -66,6 +68,17 @@ public:
+@@ -66,6 +69,17 @@ public:
  	static Achievements& Instance();
  	void setHostOverride(const std::string& host);
  
@@ -48,7 +56,7 @@ index 5420783e..1a68485d 100644
  private:
  	bool createClient();
  	std::string getGameHash();
-@@ -86,6 +99,17 @@ private:
+@@ -86,6 +100,17 @@ private:
  	// UMRK: the imported Leaf account authenticates through the same native
  	// password flow, but persists through the account bridge.
  	static void clientManagedLoginCallback(int result, const char *error_message, rc_client_t *client, void *userdata);
@@ -66,7 +74,7 @@ index 5420783e..1a68485d 100644
  	void authenticationSuccess(const rc_client_user_t *user);
  	static void clientMessageCallback(const char *message, const rc_client_t *client);
  	static u32 clientReadMemory(u32 address, u8 *buffer, u32 num_bytes, rc_client_t *client);
-@@ -111,6 +135,19 @@ private:
+@@ -111,6 +136,19 @@ private:
  	rc_client_t *rc_client = nullptr;
  	bool loggedOn = false;
  	bool hostOverrideActive = false;
@@ -86,7 +94,7 @@ index 5420783e..1a68485d 100644
  	std::atomic_bool loadingGame {};
  	bool active = false;
  	bool paused = false;
-@@ -166,6 +203,31 @@ void setHostOverride(const std::string& host) {
+@@ -166,6 +204,31 @@ void setHostOverride(const std::string& host) {
  	Achievements::Instance().setHostOverride(host);
  }
  
@@ -118,7 +126,7 @@ index 5420783e..1a68485d 100644
  void serialize(Serializer& ser) {
  	Achievements::Instance().serialize(ser);
  }
-@@ -214,6 +276,12 @@ bool Achievements::init()
+@@ -214,6 +277,16 @@ bool Achievements::init()
  	if (rc_client != nullptr)
  		return true;
  
@@ -127,11 +135,15 @@ index 5420783e..1a68485d 100644
 +	// client or start a login (the settings page calls init() every frame).
 +	if (routeHandoff() && !routeResolved)
 +		return false;
++	// The route's first rule: when the settings could not be read (Hardcore,
++	// host and account all unknown), nothing authenticates this session.
++	if (routeHandoff() && !config::isEstablished())
++		return false;
 +
  	if (!createClient())
  		return false;
  
-@@ -225,6 +293,12 @@ bool Achievements::init()
+@@ -225,6 +298,12 @@ bool Achievements::init()
  	//rc_client_set_spectator_mode_enabled(rc_client, 0);
  	loadCache();
  
@@ -144,7 +156,7 @@ index 5420783e..1a68485d 100644
  	// UMRK: an imported Leaf account authenticates with its password through
  	// the native flow. ra_account::import() has already invalidated any old
  	// managed token, so there is nothing here to fall back to.
-@@ -266,7 +340,15 @@ bool Achievements::createClient()
+@@ -266,7 +345,15 @@ bool Achievements::createClient()
  
  	rc_client_set_userdata(rc_client, this);
  
@@ -161,7 +173,7 @@ index 5420783e..1a68485d 100644
  		rc_client_set_host(rc_client, config::AchievementsHostUrl.get().c_str());
  		hostOverrideActive = true;
  	}
-@@ -408,7 +490,9 @@ void Achievements::authenticationSuccess(const rc_client_user_t *user)
+@@ -408,7 +495,9 @@ void Achievements::authenticationSuccess(const rc_client_user_t *user)
  		});
  	}
  	loggedOn = true;
@@ -172,7 +184,7 @@ index 5420783e..1a68485d 100644
  		loadGame();
  }
  
-@@ -462,6 +546,225 @@ void Achievements::clientManagedLoginCallback(int result, const char *error_mess
+@@ -462,6 +551,236 @@ void Achievements::clientManagedLoginCallback(int result, const char *error_mess
  	achievements->authenticationSuccess(user);
  }
  
@@ -230,6 +242,9 @@ index 5420783e..1a68485d 100644
 +	}
 +	ra_route::Inputs in;
 +	in.intent = routeIntent;
++	// The per-game settings are sections of the same emu.cfg, so they are
++	// only known when the store read that file (or started a fresh one).
++	in.settingsKnown = config::isEstablished();
 +	in.enabled = config::EnableAchievements && !settings.naomi.slave;
 +	// Effective Hardcore after the per-game load: Emulator::loadGame computes
 +	// raHardcoreMode, and the per-game options may still say Hardcore.
@@ -239,6 +254,14 @@ index 5420783e..1a68485d 100644
 +	const ra_route::Decision d = ra_route::decide(in);
 +	NOTICE_LOG(COMMON, "RA route: %s (%s, intent %s)", ra_route::routeName(d.route), d.reason,
 +			ra_route::intentName(routeIntent));
++	if (!in.settingsKnown)
++	{
++		// Report it and let the game run: nothing authenticates on settings
++		// this session cannot see (Hardcore, host and account are unknown).
++		setRouteStatus(i18n::Ts("Achievements unavailable: Flycast's settings could not be read."));
++		notifier.notify(Notification::Error, "", i18n::Ts("Achievements unavailable"),
++				i18n::Ts("Flycast's settings could not be read. You can play normally."));
++	}
 +	if (d.customHostIgnoredForHardcore)
 +		notifier.notify(Notification::Error, "", i18n::Ts("Hardcore uses RetroAchievements directly"),
 +				i18n::Ts("Your custom achievements host is not used this session. It stays saved."));
@@ -398,7 +421,7 @@ index 5420783e..1a68485d 100644
  std::future<void> Achievements::login(const char* username, const char* password)
  {
  	init();
-@@ -644,10 +947,14 @@ void Achievements::clientEventHandler(const rc_client_event_t* event, rc_client_
+@@ -644,10 +963,14 @@ void Achievements::clientEventHandler(const rc_client_event_t* event, rc_client_
  
  	case RC_CLIENT_EVENT_DISCONNECTED:
  		notifyError(i18n::Ts("RetroAchievements disconnected"));
@@ -413,7 +436,7 @@ index 5420783e..1a68485d 100644
  		break;
  
  	default:
-@@ -893,6 +1200,13 @@ void Achievements::resumeGame()
+@@ -893,6 +1216,13 @@ void Achievements::resumeGame()
  	if (config::EnableAchievements && !settings.naomi.slave)
  	{
  		idleThread.stop();
@@ -427,7 +450,7 @@ index 5420783e..1a68485d 100644
  		loadGame();
  		if (settings.raHardcoreMode && !config::AchievementsHardcoreMode)
  		{
-@@ -915,6 +1229,7 @@ void Achievements::emuEventCallback(Event event, void *arg)
+@@ -915,6 +1245,7 @@ void Achievements::emuEventCallback(Event event, void *arg)
  		break;
  	case Event::Terminate:
  		instance->unloadGame();
@@ -435,7 +458,7 @@ index 5420783e..1a68485d 100644
  		break;
  	case Event::VBlank:
  		rc_client_do_frame(instance->rc_client);
-@@ -980,6 +1295,8 @@ void Achievements::gameLoaded(int result, const char *errorMessage)
+@@ -980,6 +1311,8 @@ void Achievements::gameLoaded(int result, const char *errorMessage)
  			WARN_LOG(COMMON, "RA Loading game failed: %s", errorMessage);
  		settings.raHardcoreMode = false;
  		loadingGame = false;
@@ -444,7 +467,7 @@ index 5420783e..1a68485d 100644
  		return;
  	}
  	const rc_client_game_t* info = rc_client_get_game_info(rc_client);
-@@ -992,6 +1309,8 @@ void Achievements::gameLoaded(int result, const char *errorMessage)
+@@ -992,6 +1325,8 @@ void Achievements::gameLoaded(int result, const char *errorMessage)
  	}
  	active = true;
  	loadingGame = false;

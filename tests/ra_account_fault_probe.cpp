@@ -86,6 +86,8 @@ int main(int argc, char **argv)
 
 	// flycast_init(): the configuration, then the options, then the import.
 	printf("config_open=%s\n", config::open() ? "yes" : "no");
+	// What the session route reads as "settings known" (patch 0003).
+	printf("config_established=%s\n", config::isEstablished() ? "yes" : "no");
 	config::loadAchievementOptions();
 
 	ra::import();

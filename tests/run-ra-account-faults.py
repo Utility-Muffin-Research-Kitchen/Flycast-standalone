@@ -248,11 +248,19 @@ CRASH_FAULTS = [("fwrite", "partial"), ("fsync", "crash"), ("rename", "crash")]
 def scenario_baseline(accepted_a: Card) -> None:
     card = accepted_a.fork()
     run = launch("baseline: token reuse", card.path, configured(ACCOUNT_A, 1))
+    check(run.get("config_established") == "yes", "baseline: a readable emu.cfg is not established")
     check(run.get("login", "").startswith(f"token user={ACCOUNT_A[0]}"),
           f"baseline: expected token reuse, got {run.get('login')!r}")
     check(run.get("status") == "accepted", "baseline: token reuse status")
     control = accepted_a.fork()
     expect_fresh_import("baseline: import B", control, ACCOUNT_B, 2, ACCOUNT_B[2])
+    # No emu.cfg at all is a fresh default configuration, not an unknown one.
+    fresh = Card()
+    os.remove(os.path.join(fresh.path, CFG))
+    run = launch("baseline: fresh configuration", fresh.path, configured(ACCOUNT_A, 1),
+                 args=["--server-token", ACCOUNT_A[2]])
+    check(run.get("config_established") == "yes", "baseline: a missing emu.cfg is not a fresh configuration")
+    check(run.get("status") == "accepted", f"baseline: fresh configuration status {run.get('status')!r}")
 
 
 def scenario_pending_marker(accepted_a: Card) -> None:
@@ -422,6 +430,8 @@ def scenario_unreadable_config(accepted_a: Card) -> None:
         cfg_before, _ = card.snapshot()
         run = launch(name, card.path, configured(ACCOUNT_B, 2), f"fopen_r:{CFG}:{mode}",
                      args=["--server-token", ACCOUNT_B[2]])
+        check(run.get("config_established") == "no",
+              f"{name}: the store reported an unread configuration as established")
         check(read(os.path.join(card.path, CFG)) == cfg_before,
               f"{name}: the import overwrote a configuration it could not read")
         check(run.get("login") == "none", f"{name}: authenticated on an unknown configuration ({run.get('login')!r})")
