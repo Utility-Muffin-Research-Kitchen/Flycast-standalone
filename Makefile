@@ -7,7 +7,8 @@ MLP1_BUILD_PROFILE ?= perf
 
 .PHONY: build-mlp1 fetch-upstream fetch-contract-fixtures package-mlp1 \
 	verify-mlp1 verify-package-mlp1 smoke-launch-wrapper build-lock-test \
-	package-version-test ra-account-contract-test dist-source test-dist-source clean
+	package-version-test ra-account-contract-test ra-account-fault-test \
+	dist-source test-dist-source clean
 
 fetch-upstream:
 	./scripts/fetch-upstream.sh
@@ -52,6 +53,9 @@ test-dist-source: dist-source
 
 ra-account-contract-test:
 	./scripts/ra-account-contract-test.sh
+
+ra-account-fault-test:
+	./scripts/ra-account-fault-test.sh
 
 clean:
 	rm -rf output/mlp1 output/host

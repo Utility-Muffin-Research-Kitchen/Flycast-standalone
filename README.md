@@ -70,19 +70,38 @@ changing or clearing the account in Leaf takes effect on the next launch.
 
 The wrapper scrubs the snapshot from its own environment on entry and
 re-exports it only for the emulator exec, so no helper it runs can read the
-password, and the account never reaches argv, the log or `env.sh`.
+password, and the account never reaches argv, the log or `env.sh`. RetroArch's
+own credential handoff (`JAWAKA_CHEEVOS_*`) has no place in a standalone
+launch: the wrapper drops its values on entry and passes Flycast only the fact
+that it was present, which Flycast reports as `stale-retroarch-credentials`.
+
+If `emu.cfg` exists but cannot be read, Flycast's settings are unknown: the
+import writes nothing, authenticates nothing and reports it, rather than
+replacing the whole file with the three account keys. A marker that exists but
+cannot be read counts as managed state that cannot be trusted, never as no
+marker.
 
 Host checks:
 
 ```sh
 make ra-account-contract-test
+make ra-account-fault-test
 make smoke-launch-wrapper
 ```
 
 The first replays the shared fixtures from public `leaf-contracts`, at the
 revision pinned in `locks/contracts.lock.json`, through the emulator's own
 classifier, and exercises the marker and every account transition including
-the write failures. The second proves the wrapper's handoff and scrubbing.
+the write failures. The second compiles the real account bridge and
+configuration store against small host stand-ins (`tests/host-stubs`) with an
+`fopen`/`fwrite`/`fflush`/`fsync`/`fclose`/`rename` fault shim, then fails and
+interrupts every account write at each boundary (pending marker, configuration
+save, accepted marker), with read-only, storage-exhausted and I/O errors, plus
+corrupt and unreadable markers, an unreadable `emu.cfg`, a failing log writer
+and the login callbacks' failure paths. It asserts that no revision is accepted
+without its token, the previous `emu.cfg` survives, and the previously
+imported account never comes back. The third proves the wrapper's handoff and
+scrubbing.
 
 Flycast's compile-time debug logger is disabled. Its high-frequency CPU and
 GD-ROM trace stream can otherwise write more than a megabyte per second to the

@@ -62,6 +62,12 @@ jobs:
             echo "no standalone-ra-account-v1 consumer on this branch; skipping"
           fi
 
+      # The real bridge and configuration store under an fopen/fwrite/fflush/
+      # fsync/fclose/rename shim: every account write failed and interrupted,
+      # corrupt and unreadable markers, an unreadable emu.cfg, a failing log.
+      - name: Account host fault injection
+        run: make ra-account-fault-test
+
       - name: Verify the assembled package
         run: ./scripts/verify-mlp1-package.sh
 

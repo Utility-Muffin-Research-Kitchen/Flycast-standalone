@@ -325,10 +325,10 @@ index 00000000..e5000cf7
 +} // namespace achievements::ra_account
 diff --git a/core/achievements/ra_account_bridge.cpp b/core/achievements/ra_account_bridge.cpp
 new file mode 100644
-index 00000000..88e12362
+index 00000000..5a682748
 --- /dev/null
 +++ b/core/achievements/ra_account_bridge.cpp
-@@ -0,0 +1,423 @@
+@@ -0,0 +1,439 @@
 +/*
 +	UMRK: standalone-ra-account-v1 bridge between Leaf and Flycast's own
 +	RetroAchievements account.
@@ -466,6 +466,22 @@ index 00000000..88e12362
 +		// The producer failed to scrub RetroArch's own handoff. Report it:
 +		// silently ignoring it would hide a real isolation bug.
 +		WARN_LOG(COMMON, "RA account: RetroArch credential variables leaked into this launch");
++
++	if (!config::isEstablished()
++			&& decision.action != Action::Unmanaged && decision.action != Action::Idle)
++	{
++		// emu.cfg exists but could not be read: the effective settings, the
++		// persisted account and its token are all unknown. Write nothing (not
++		// even the marker) and authenticate nothing; the next launch that
++		// can read the file decides again.
++		b.managed = true;
++		b.suppressed = true;
++		b.tokenLoginAllowed = false;
++		setStatus(b, "config-unreadable");
++		report(i18n::Ts("RetroAchievements: the Flycast settings could not be read"),
++				decision.reason);
++		return;
++	}
 +
 +	switch (decision.action)
 +	{
@@ -754,10 +770,10 @@ index 00000000..88e12362
 +#endif
 diff --git a/core/achievements/ra_account_contract.cpp b/core/achievements/ra_account_contract.cpp
 new file mode 100644
-index 00000000..8b5e37cc
+index 00000000..6d94aceb
 --- /dev/null
 +++ b/core/achievements/ra_account_contract.cpp
-@@ -0,0 +1,581 @@
+@@ -0,0 +1,586 @@
 +/*
 +	UMRK: standalone-ra-account-v1 classifier, marker and transition rules.
 +
@@ -771,6 +787,7 @@ index 00000000..8b5e37cc
 +// classify(), so the emulator and the reference classifier cannot drift.
 +#include "ra_account.h"
 +
++#include <cerrno>
 +#include <cstdio>
 +#include <cstdlib>
 +#include <cstring>
@@ -1098,7 +1115,11 @@ index 00000000..8b5e37cc
 +{
 +	FILE *f = fopen(path.c_str(), "rb");
 +	if (f == nullptr)
-+		return MarkerStatus::Absent;
++		// Only a marker that does not exist is absent. One that exists but
++		// cannot be opened (EACCES, EIO on a failing card) is managed state
++		// this launch cannot read, so it must not look unmanaged and let the
++		// last imported token back in.
++		return errno == ENOENT ? MarkerStatus::Absent : MarkerStatus::Malformed;
 +	std::string content;
 +	char buffer[512];
 +	size_t read;
@@ -1340,7 +1361,7 @@ index 00000000..8b5e37cc
 +
 +} // namespace achievements::ra_account
 diff --git a/core/cfg/cfg.cpp b/core/cfg/cfg.cpp
-index 55775828..32eb1b0e 100644
+index 55775828..ceb5fd38 100644
 --- a/core/cfg/cfg.cpp
 +++ b/core/cfg/cfg.cpp
 @@ -1,7 +1,12 @@
@@ -1356,15 +1377,54 @@ index 55775828..32eb1b0e 100644
  
  namespace config
  {
-@@ -132,4 +137,49 @@ std::vector<std::string> getEntries(const std::string& section) {
+@@ -9,6 +14,8 @@ namespace config
+ static std::string cfgPath;
+ static bool autoSaving = true;
+ static IniFile cfgdb;
++// UMRK: whether cfgdb holds the user's configuration (see isEstablished()).
++static bool established = false;
+ 
+ static void saveFile()
+ {
+@@ -40,6 +47,8 @@ bool open()
+ 	hostfs::File* cfgfile = hostfs::storage().openFile(config_path_read.c_str(), "rt");
+ 	if (cfgfile != nullptr) {
+ 		cfgdb.load(cfgfile);
++		// UMRK: a read error part-way leaves only part of the file in cfgdb.
++		established = cfgfile->error() == 0;
+ 		delete cfgfile;
+ 	}
+ 	else
+@@ -47,6 +56,9 @@ bool open()
+ 		// Config file can't be opened
+ 		int error_code = errno;
+ 		WARN_LOG(COMMON, "Warning: Unable to open the config file '%s' for reading (%s)", config_path_read.c_str(), strerror(error_code));
++		// UMRK: a missing file is a fresh default configuration; one that
++		// exists but cannot be read is the user's, contents unknown.
++		established = error_code == ENOENT || cfgPath != config_path_read;
+ 		if (error_code == ENOENT || cfgPath != config_path_read)
+ 		{
+ 			// Config file didn't exist
+@@ -132,4 +144,60 @@ std::vector<std::string> getEntries(const std::string& section) {
  	return cfgdb.getEntryNames(section);
  }
  
++bool isEstablished() {
++	return established;
++}
++
 +bool saveKeysChecked(const std::vector<CheckedEntry>& entries)
 +{
 +	if (cfgPath.empty()) {
 +		WARN_LOG(COMMON, "Error: no config path, cannot save %d checked entries",
 +				(int)entries.size());
++		return false;
++	}
++	if (!established) {
++		// The whole file is rewritten from cfgdb, which does not hold the
++		// user's settings: saving now would replace them with these keys.
++		WARN_LOG(COMMON, "Error: the config file '%s' could not be read; not saving %d checked entries over it",
++				cfgPath.c_str(), (int)entries.size());
 +		return false;
 +	}
 +	for (const CheckedEntry& entry : entries)
@@ -1407,10 +1467,10 @@ index 55775828..32eb1b0e 100644
 +
  }	// namespace config
 diff --git a/core/cfg/cfg.h b/core/cfg/cfg.h
-index a20f0201..5c9ac048 100644
+index a20f0201..5b6a014e 100644
 --- a/core/cfg/cfg.h
 +++ b/core/cfg/cfg.h
-@@ -20,6 +20,25 @@ void saveFloat(const std::string& section, const std::string& key, float value);
+@@ -20,6 +20,31 @@ void saveFloat(const std::string& section, const std::string& key, float value);
  void setTransient(const std::string& section, const std::string& key, const std::string& value);
  bool isTransient(const std::string& section, const std::string& key);
  
@@ -1432,6 +1492,12 @@ index a20f0201..5c9ac048 100644
 +// read-only mid-write. This is the path the Leaf account bridge uses, where
 +// "the token was written" has to actually mean it.
 +bool saveKeysChecked(const std::vector<CheckedEntry>& entries);
++
++// UMRK: true when open() read emu.cfg completely, or found none and started a
++// fresh default configuration. False when the file exists but could not be
++// read: the effective settings are unknown, and saveKeysChecked() refuses to
++// write over a configuration it never saw.
++bool isEstablished();
 +
  void parseCommandLine(int argc, const char * const argv[]);
  
