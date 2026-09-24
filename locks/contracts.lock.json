@@ -2,13 +2,13 @@
   "schema": 1,
   "leaf_contracts": {
     "project": "Utility-Muffin-Research-Kitchen/leaf-contracts",
-    "commit": "bd8944a748e16bd495a84f23b4d96a45117b1816",
+    "commit": "f25fd2a18fe02bee72141a8a8f220aad28551e29",
     "commit_note": "standalone-ra-account-v1 as published on agent/standalone-ra-account-contract (leaf-contracts PR #9). This is a deliberate pre-merge pin: bump it to the merged main revision, as a reviewed change, once that PR lands. The consumer must never follow a moving branch.",
     "raw_url_prefix": "https://raw.githubusercontent.com/Utility-Muffin-Research-Kitchen/leaf-contracts",
     "files": [
       {
         "path": "contracts/leaf-services/standalone-ra-account-v1/fixtures.json",
-        "sha256": "ba349d96779ffdbe59a055d2ea42f383418267734f99589ac0a524c67bc7912b"
+        "sha256": "981a98efb4f55598918e410d6a443fb2ddf0330e2ee46138175b9cb53d18d534"
       }
     ]
   }
