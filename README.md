@@ -45,7 +45,7 @@ native 480p GLES, MLP1 rotation, threaded rendering, per-strip sorting, AICA
 DSP disabled, and adaptive GPU frame skipping. It deliberately keeps fixed
 frame skipping disabled.
 
-The MLP1 build carries one narrow upstream patch: when
+The MLP1 rotation patch applies when
 `FLYCAST_UI_ROTATE_90=1`, Flycast lays out its ImGui UI in landscape and rotates
 those UI vertices to the portrait-mounted KMS framebuffer. Gameplay continues
 to use Flycast's existing `rend.Rotate90` renderer path, so opening the native
@@ -95,3 +95,27 @@ make package-version-test
 ```
 
 No BIOS or game content is included.
+
+You can create complete corresponding source from a clean, committed clone:
+
+```sh
+make package-mlp1
+make test-dist-source
+```
+
+The second command writes `output/dist/flycast-2.7.0-source.tar.gz` and checks
+that another export has identical bytes. It includes the packaging scripts,
+patched Flycast source, all locked recursive submodules and their licences,
+and both locked build flag files. You need Python 3.12 or newer to create or
+verify the archive. CI uploads it alongside the payload.
+
+To rebuild it, extract the archive and run `make package-mlp1` in
+`flycast-source/`. Cache the digest-pinned Docker image first; the build then
+needs no Git metadata, sibling checkout or network access. The source receipt
+checks the bundled inputs before compilation. A small CMake patch preserves
+the locked upstream version and revision when Git metadata is absent.
+
+`make test-dist-source` also rejects modified source, dependency, patch and
+flag files, then rebuilds the extracted archive with host Git/download commands
+blocked and the container network disabled. It compares the binary and every
+packaged file's bytes and permissions against the ordinary build.

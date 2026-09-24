@@ -154,6 +154,10 @@
     "note": "The MLP1 patch series, in application order (the C-locale sort of patches/*.patch). fetch-upstream.sh refuses to touch the source tree unless the directory holds exactly these files with exactly these hashes; a patch added, removed, renamed or edited without updating this list fails the build.",
     "entries": [
       {
+        "path": "patches/0000-locked-source-version.patch",
+        "sha256": "ae75c5287c196bfecc055c1dbb152e1c9548379a9bc4e9a9c1a019ee1abac7c9"
+      },
+      {
         "path": "patches/0001-mlp1-rotate-imgui.patch",
         "sha256": "1d88c0bf64e93747df25944091316f11553e82cf34a3af9040709e0ff7eca42c"
       }

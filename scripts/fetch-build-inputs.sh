@@ -10,6 +10,12 @@ LOCK="$ROOT_DIR/locks/build-inputs.lock.json"
 SOURCES_DIR="${1:-$ROOT_DIR/workdir/sources}"
 OUT_DIR="$ROOT_DIR/workdir/build-inputs"
 
+# The two hash-locked flag files are included in the source distribution.
+if [ -f "$ROOT_DIR/corresponding-source.json" ]; then
+    python3 "$ROOT_DIR/scripts/dist-source.py" verify
+    exit 0
+fi
+
 sha256_of() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum "$1" | awk '{print $1}'

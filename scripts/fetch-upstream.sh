@@ -14,6 +14,13 @@ LOCK="$ROOT_DIR/locks/build-inputs.lock.json"
 # an unrecorded patch can neither be applied nor reversed.
 python3 "$ROOT_DIR/scripts/check-build-lock.py" patches "$LOCK" "$PATCH_DIR"
 
+# The distribution carries the complete, already-patched source. Verify it
+# against its receipt instead of fetching or trying to patch it a second time.
+if [ -f "$ROOT_DIR/corresponding-source.json" ]; then
+    python3 "$ROOT_DIR/scripts/dist-source.py" verify
+    exit 0
+fi
+
 mkdir -p "$(dirname "$SOURCE_DIR")"
 
 if [ ! -d "$SOURCE_DIR/.git" ]; then
@@ -67,6 +74,10 @@ git -C "$SOURCE_DIR" submodule status --recursive |
 actual_sha="$(git -C "$SOURCE_DIR" rev-parse HEAD)"
 if [ "$actual_sha" != "$FLYCAST_UPSTREAM_SHA" ]; then
     echo "Flycast checkout mismatch after checkout: $actual_sha" >&2
+    exit 1
+fi
+if [ "$(git -C "$SOURCE_DIR" show -s --format=%ct HEAD)" != "$FLYCAST_SOURCE_DATE_EPOCH" ]; then
+    echo "Flycast source date does not match upstream.env" >&2
     exit 1
 fi
 

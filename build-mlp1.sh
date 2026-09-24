@@ -48,6 +48,7 @@ fi
 mkdir -p "$BUILD_DIR" "$ARTIFACT_DIR"
 
 "$DOCKER" run --rm \
+    --network=none \
     -v "$ROOT_DIR":/build \
     -v "$ROOT_DIR/workdir/build-inputs/flags":/umrk-flags:ro \
     -w /build \
@@ -68,8 +69,8 @@ else
     image_id="$("$DOCKER" image inspect "$TOOLCHAIN_IMAGE" --format '{{.Id}}')"
 fi
 binary_sha="$(shasum -a 256 "$ARTIFACT_DIR/bin/flycast" | awk '{print $1}')"
-source_sha="$(git -C "$SOURCE_DIR" rev-parse HEAD)"
-source_date_epoch="$(git -C "$SOURCE_DIR" show -s --format=%ct HEAD)"
+source_sha="$FLYCAST_UPSTREAM_SHA"
+source_date_epoch="$FLYCAST_SOURCE_DATE_EPOCH"
 dynamic_dependencies="$(
     awk -F'[][]' '
         /Shared library:/ {

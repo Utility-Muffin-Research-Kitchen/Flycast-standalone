@@ -68,6 +68,9 @@ jobs:
       - name: Package version gate
         run: make package-version-test
 
+      - name: Complete source archive and offline payload reproduction
+        run: make test-dist-source
+
       - name: Show the locked binary identity
         run: |
           binary=output/mlp1/build/bin/flycast
@@ -77,10 +80,18 @@ jobs:
                  "upstream_sha=" + .upstream_sha,
                  "toolchain_image_id=" + .toolchain_image_id' \
             output/mlp1/build/build-manifest.json
+          sha256sum output/dist/flycast-*-source.tar.gz
 
       - name: Upload the assembled payload
         uses: actions/upload-artifact@v4
         with:
           name: flycast-mlp1-payload
           path: output/mlp1/flycast
+          if-no-files-found: error
+
+      - name: Upload the corresponding source
+        uses: actions/upload-artifact@v4
+        with:
+          name: flycast-corresponding-source
+          path: output/dist/flycast-*-source.tar.gz
           if-no-files-found: error

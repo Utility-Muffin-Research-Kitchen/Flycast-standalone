@@ -1,0 +1,17 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -134,7 +134,12 @@ endif()
+ endif()
+ 
+ find_package(Git)
+-if(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
++# A corresponding-source archive has no Git metadata. Packagers can supply
++# the locked identity, also used for their normal checkout build.
++if(DEFINED FLYCAST_BUILD_VERSION AND DEFINED FLYCAST_BUILD_COMMIT)
++	set(GIT_VERSION "${FLYCAST_BUILD_VERSION}")
++	set(GIT_HASH "${FLYCAST_BUILD_COMMIT}")
++elseif(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
+ 	execute_process(
+ 		COMMAND ${GIT_EXECUTABLE} describe --tags --always
+ 		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
