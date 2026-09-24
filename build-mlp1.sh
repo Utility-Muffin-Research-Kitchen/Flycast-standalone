@@ -49,6 +49,7 @@ mkdir -p "$BUILD_DIR" "$ARTIFACT_DIR"
 
 "$DOCKER" run --rm \
     --network=none \
+    --user "$(id -u):$(id -g)" \
     -v "$ROOT_DIR":/build \
     -v "$ROOT_DIR/workdir/build-inputs/flags":/umrk-flags:ro \
     -w /build \
