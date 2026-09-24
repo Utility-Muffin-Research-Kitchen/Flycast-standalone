@@ -44,6 +44,24 @@ umrk_ra_revision="${UMRK_RA_ACCOUNT_REVISION-}"
 unset UMRK_RA_ACCOUNT_VERSION UMRK_RA_ACCOUNT_STATE UMRK_RA_ACCOUNT_USERNAME \
     UMRK_RA_ACCOUNT_PASSWORD UMRK_RA_ACCOUNT_REVISION
 
+# RetroArch's per-launch credential handoff (JAWAKA_CHEEVOS_*) is for
+# RetroArch only; in a standalone launch it is a leak from the launcher. Its
+# values are dropped here, with the snapshot, before any helper runs, and are
+# never passed on. The contract still wants the leak reported
+# (stale-retroarch-credentials), so the two names the emulator checks are
+# handed to it present but empty: presence without the password.
+umrk_stale_ra_username="${JAWAKA_CHEEVOS_USERNAME+1}"
+umrk_stale_ra_password="${JAWAKA_CHEEVOS_PASSWORD+1}"
+scrub_retroarch_credentials() {
+    local name
+    for name in $(compgen -e); do
+        case "$name" in
+            JAWAKA_CHEEVOS_*) unset "$name" ;;
+        esac
+    done
+}
+scrub_retroarch_credentials
+
 restore_ra_account_snapshot() {
     if [ -n "$umrk_ra_set_version" ]; then
         export UMRK_RA_ACCOUNT_VERSION="$umrk_ra_version"
@@ -60,6 +78,12 @@ restore_ra_account_snapshot() {
     if [ -n "$umrk_ra_set_revision" ]; then
         export UMRK_RA_ACCOUNT_REVISION="$umrk_ra_revision"
     fi
+    if [ -n "$umrk_stale_ra_username" ]; then
+        export JAWAKA_CHEEVOS_USERNAME=""
+    fi
+    if [ -n "$umrk_stale_ra_password" ]; then
+        export JAWAKA_CHEEVOS_PASSWORD=""
+    fi
 }
 
 if [ -n "${UMRK_ENV_FILE:-}" ] && [ -f "$UMRK_ENV_FILE" ]; then
@@ -72,9 +96,14 @@ elif [ -n "${SDCARD_PATH:-}" ] && [ -n "${PLATFORM:-}" ] &&
 fi
 # The account snapshot is per-launch state from the daemon, never durable
 # environment. A value that appears here came from env.sh, which is exactly
-# where credentials must not be, so drop it instead of passing it on.
+# where credentials must not be, so drop it instead of passing it on. The same
+# goes for RetroArch's credential handoff.
 unset UMRK_RA_ACCOUNT_VERSION UMRK_RA_ACCOUNT_STATE UMRK_RA_ACCOUNT_USERNAME \
     UMRK_RA_ACCOUNT_PASSWORD UMRK_RA_ACCOUNT_REVISION
+scrub_retroarch_credentials
+if [ -n "$umrk_stale_ra_username$umrk_stale_ra_password" ]; then
+    log "RetroArch achievement credentials were set for this launch; dropped"
+fi
 
 if [ "$#" -ne 1 ]; then
     log "usage: $0 ROM"

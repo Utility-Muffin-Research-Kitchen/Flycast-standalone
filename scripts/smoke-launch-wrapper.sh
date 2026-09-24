@@ -36,6 +36,10 @@ for name in HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME \
     UMRK_RA_ACCOUNT_USERNAME UMRK_RA_ACCOUNT_PASSWORD UMRK_RA_ACCOUNT_REVISION; do
     printf '%s=<%s>\n' "$name" "${!name-}"
 done
+# RetroArch's handoff: whether each name is set at all, and its value.
+for name in JAWAKA_CHEEVOS_USERNAME JAWAKA_CHEEVOS_PASSWORD JAWAKA_CHEEVOS_EXTRA; do
+    printf '%s[%s]=<%s>\n' "$name" "${!name+set}" "${!name-}"
+done
 index=0
 for argument in "$@"; do
     printf 'arg_%d=<%s>\n' "$index" "$argument"
@@ -309,7 +313,8 @@ fi
 cat >"$SPY_DIR/sha256sum" <<EOF
 #!/usr/bin/env bash
 for name in UMRK_RA_ACCOUNT_VERSION UMRK_RA_ACCOUNT_STATE \\
-    UMRK_RA_ACCOUNT_USERNAME UMRK_RA_ACCOUNT_PASSWORD UMRK_RA_ACCOUNT_REVISION; do
+    UMRK_RA_ACCOUNT_USERNAME UMRK_RA_ACCOUNT_PASSWORD UMRK_RA_ACCOUNT_REVISION \\
+    JAWAKA_CHEEVOS_USERNAME JAWAKA_CHEEVOS_PASSWORD JAWAKA_CHEEVOS_EXTRA; do
     printf 'helper %s=<%s>\\n' "\$name" "\${!name-}" >>"$SPY_LOG"
 done
 exec "$REAL_SHA256SUM" "\$@"
@@ -318,6 +323,8 @@ chmod 0755 "$SPY_DIR/sha256sum"
 
 RA_USERNAME="o'hara \"junior\""
 RA_PASSWORD='p@$$ w0rd; |, >&`~*?[]{}^%\!'
+# A leaked RetroArch handoff (JAWAKA_CHEEVOS_*), synthetic.
+RETROARCH_PASSWORD='retroarch-only synthetic secret'
 
 run_wrapper_account() {
     env -u UMRK_ENV_FILE \
@@ -336,12 +343,16 @@ run_wrapper_account() {
         UMRK_RA_ACCOUNT_USERNAME="$RA_USERNAME" \
         UMRK_RA_ACCOUNT_PASSWORD="$RA_PASSWORD" \
         UMRK_RA_ACCOUNT_REVISION=42 \
+        JAWAKA_CHEEVOS_USERNAME=retroarch-user \
+        JAWAKA_CHEEVOS_PASSWORD="$RETROARCH_PASSWORD" \
+        JAWAKA_CHEEVOS_EXTRA="$RETROARCH_PASSWORD" \
         "$PACKAGE_DIR/launch.sh" "$ROM_PATH"
 }
 
 # Force the migration path so the shadowed helper actually runs this launch.
 printf '1\n' >"$CONFIG_DIR/.umrk-defaults-version"
-run_wrapper_account
+WRAPPER_OUT="$TMP_ROOT/wrapper.out"
+run_wrapper_account >"$WRAPPER_OUT" 2>&1
 
 if [ ! -s "$SPY_LOG" ]; then
     echo "account smoke did not exercise a wrapper helper" >&2
@@ -364,6 +375,25 @@ for expected in \
     fi
 done
 
+# The leaked RetroArch handoff: no helper saw it (checked above with the
+# snapshot), its values reach nothing, and the emulator gets exactly the two
+# names it checks, present and empty, so it can still report the leak.
+for expected in \
+    'JAWAKA_CHEEVOS_USERNAME[set]=<>' \
+    'JAWAKA_CHEEVOS_PASSWORD[set]=<>' \
+    'JAWAKA_CHEEVOS_EXTRA[]=<>'; do
+    if ! grep -F "$expected" "$LOG_FILE" >/dev/null; then
+        echo "launch wrapper did not reduce the RetroArch handoff to $expected" >&2
+        exit 1
+    fi
+done
+if grep -F -e "$RETROARCH_PASSWORD" -e retroarch-user "$LOG_FILE" "$WRAPPER_OUT" "$SPY_LOG" >/dev/null; then
+    echo "launch wrapper passed on or logged RetroArch credentials" >&2
+    exit 1
+fi
+grep -F 'RetroArch achievement credentials were set for this launch; dropped' \
+    "$WRAPPER_OUT" >/dev/null
+
 # Nothing about the snapshot belongs in argv: it would be world-readable in
 # /proc for the life of the process.
 if grep -E '^arg_[0-9]+=.*UMRK_RA_ACCOUNT' "$LOG_FILE" >/dev/null; then
@@ -385,6 +415,13 @@ for name in UMRK_RA_ACCOUNT_VERSION UMRK_RA_ACCOUNT_STATE \
         exit 1
     fi
 done
+# ... nor invent the RetroArch names when there was no leak.
+for name in JAWAKA_CHEEVOS_USERNAME JAWAKA_CHEEVOS_PASSWORD; do
+    if ! grep -F "$name[]=<>" "$LOG_FILE" >/dev/null; then
+        echo "launch wrapper set $name without a leak" >&2
+        exit 1
+    fi
+done
 
 # env.sh is durable environment, never a credential source: a value that shows
 # up there is dropped rather than handed to the emulator.
@@ -395,6 +432,8 @@ export UMRK_RA_ACCOUNT_STATE=configured
 export UMRK_RA_ACCOUNT_USERNAME=from-env-sh
 export UMRK_RA_ACCOUNT_PASSWORD=from-env-sh
 export UMRK_RA_ACCOUNT_REVISION=9
+export JAWAKA_CHEEVOS_USERNAME=from-env-sh
+export JAWAKA_CHEEVOS_PASSWORD=from-env-sh
 EOF
 env -u UMRK_RA_ACCOUNT_VERSION -u UMRK_RA_ACCOUNT_STATE \
     -u UMRK_RA_ACCOUNT_USERNAME -u UMRK_RA_ACCOUNT_PASSWORD \
@@ -414,5 +453,6 @@ if grep -F 'from-env-sh' "$LOG_FILE" >/dev/null; then
     echo "launch wrapper handed the emulator credentials from env.sh" >&2
     exit 1
 fi
+grep -F 'JAWAKA_CHEEVOS_PASSWORD[]=<>' "$LOG_FILE" >/dev/null
 
-printf 'Verified launch wrapper paths, quoting, seed policy, account handoff, and user-config preservation\n'
+printf 'Verified launch wrapper paths, quoting, seed policy, account handoff, RetroArch credential scrub, and user-config preservation\n'
