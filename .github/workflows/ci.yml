@@ -45,7 +45,12 @@ jobs:
       - name: Build the locked MLP1 payload
         run: make package-mlp1
 
-      - name: Verify the ELF, achievements and HTTPS linkage
+      # The checker behind the next step rejects a binary that lacks what its
+      # capability records promise (account bridge, session route).
+      - name: Capability record checks
+        run: make binary-capabilities-test
+
+      - name: Verify the ELF, achievements, route and HTTPS linkage
         run: ./scripts/verify-mlp1-binary.sh
 
       - name: Verify launch wrapper handoff and scrubbing
