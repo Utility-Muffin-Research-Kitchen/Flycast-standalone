@@ -20,6 +20,19 @@ The distributable lane builds inside the digest-pinned published
 fetches and hash-verifies the flags; upstream source and all generated artifacts
 stay in the ignored `workdir/` and `output/` directories.
 
+The lock also declares the toolchain platform and cross triple, every
+upstream submodule commit, and the ordered patch series with each patch's
+SHA-256. `scripts/check-build-lock.py` enforces them: `fetch-upstream.sh`
+refuses a patch series that differs from the lock before it touches the source
+and refuses submodules at other commits after checkout, and `build-mlp1.sh`
+refuses a toolchain image of another platform or triple. A patch change
+therefore always lands with its lock entry.
+
+The package version, `2.7.0`, is declared once as `FLYCAST_PACKAGE_VERSION` in
+`upstream.env`. It is exactly three numeric components, follows the upstream
+tag's major and minor version, and is emitted as `package_version` in
+`build-manifest.json`; `verify-mlp1-package.sh` rejects any other form.
+
 `make package-mlp1` writes `output/mlp1/flycast/`. Leaf will eventually stage
 that directory under:
 
@@ -77,6 +90,8 @@ Useful narrow checks:
 ```sh
 make smoke-launch-wrapper
 make verify-package-mlp1
+make build-lock-test
+make package-version-test
 ```
 
 No BIOS or game content is included.

@@ -4,9 +4,15 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_DIR="${FLYCAST_SOURCE_DIR:-$ROOT_DIR/workdir/mlp1/flycast}"
 PATCH_DIR="$ROOT_DIR/patches"
+LOCK="$ROOT_DIR/locks/build-inputs.lock.json"
 
 # shellcheck source=../upstream.env
 . "$ROOT_DIR/upstream.env"
+
+# The patch series is a declared input: exactly the locked files, in the locked
+# order, with the locked hashes. Checked before the source tree is touched, so
+# an unrecorded patch can neither be applied nor reversed.
+python3 "$ROOT_DIR/scripts/check-build-lock.py" patches "$LOCK" "$PATCH_DIR"
 
 mkdir -p "$(dirname "$SOURCE_DIR")"
 
@@ -55,6 +61,8 @@ fi
 git -C "$SOURCE_DIR" checkout --detach "$FLYCAST_UPSTREAM_SHA"
 git -C "$SOURCE_DIR" submodule sync --recursive
 git -C "$SOURCE_DIR" submodule update --init --recursive --depth 1
+git -C "$SOURCE_DIR" submodule status --recursive |
+    python3 "$ROOT_DIR/scripts/check-build-lock.py" submodules "$LOCK" -
 
 actual_sha="$(git -C "$SOURCE_DIR" rev-parse HEAD)"
 if [ "$actual_sha" != "$FLYCAST_UPSTREAM_SHA" ]; then

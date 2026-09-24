@@ -25,6 +25,23 @@ if ! "$DOCKER" image inspect "$TOOLCHAIN_IMAGE" >/dev/null 2>&1; then
     fi
 fi
 
+# The lock fixes the toolchain platform and cross triple, not just the image
+# digest: an override image for toolchain development must still build for the
+# same target, or the build stops here.
+image_platform="$("$DOCKER" image inspect "$TOOLCHAIN_IMAGE" --format '{{.Os}}/{{.Architecture}}')"
+python3 "$ROOT_DIR/scripts/check-build-lock.py" toolchain "$LOCK" "$image_platform"
+locked_cross_triple="$(python3 "$ROOT_DIR/scripts/check-build-lock.py" cross-triple "$LOCK")"
+
+# shellcheck source=upstream.env
+. "$ROOT_DIR/upstream.env"
+# The package version is declared once, in upstream.env. Pak Rat and the
+# release trigger accept exactly three numeric components, so anything else
+# (a suffix, a missing component) stops the build before it starts.
+if ! [[ "${FLYCAST_PACKAGE_VERSION:-}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+    echo "FLYCAST_PACKAGE_VERSION must be MAJOR.MINOR.PATCH: '${FLYCAST_PACKAGE_VERSION:-}'" >&2
+    exit 1
+fi
+
 "$ROOT_DIR/scripts/fetch-upstream.sh"
 "$ROOT_DIR/scripts/fetch-build-inputs.sh"
 
@@ -36,6 +53,7 @@ mkdir -p "$BUILD_DIR" "$ARTIFACT_DIR"
     -w /build \
     -e BUILD_JOBS="$BUILD_JOBS" \
     -e MLP1_BUILD_PROFILE="$MLP1_BUILD_PROFILE" \
+    -e UMRK_LOCKED_CROSS_TRIPLE="$locked_cross_triple" \
     "$TOOLCHAIN_IMAGE" \
     bash /build/scripts/build-mlp1-in-docker.sh
 
@@ -68,15 +86,13 @@ dynamic_dependencies="$(
     ' "$ARTIFACT_DIR/provenance/elf-dynamic.txt"
 )"
 
-# shellcheck source=upstream.env
-. "$ROOT_DIR/upstream.env"
-
 cat >"$ARTIFACT_DIR/build-manifest.json" <<EOF
 {
   "id": "flycast_standalone",
   "name": "Flycast Standalone",
   "platform": "mlp1",
   "kind": "standalone-emulator",
+  "package_version": "$FLYCAST_PACKAGE_VERSION",
   "upstream_url": "$FLYCAST_UPSTREAM_URL",
   "upstream_tag": "$FLYCAST_UPSTREAM_TAG",
   "upstream_sha": "$source_sha",
@@ -101,5 +117,5 @@ cat >"$ARTIFACT_DIR/build-manifest.json" <<EOF
 }
 EOF
 
-printf 'Built Flycast %s for MLP1: %s\n' \
-    "$FLYCAST_UPSTREAM_TAG" "$binary_sha"
+printf 'Built Flycast %s (package %s) for MLP1: %s\n' \
+    "$FLYCAST_UPSTREAM_TAG" "$FLYCAST_PACKAGE_VERSION" "$binary_sha"

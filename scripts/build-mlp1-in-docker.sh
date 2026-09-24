@@ -8,6 +8,14 @@ ARTIFACT_DIR=/build/output/mlp1/build
 # shellcheck source=/dev/null
 . /umrk-flags/mlp1-build-flags.env
 
+# build-mlp1.sh passes the triple the lock records; the image exports its own.
+if [ -z "${UMRK_LOCKED_CROSS_TRIPLE:-}" ] ||
+   [ "${CROSS_TRIPLE:-}" != "$UMRK_LOCKED_CROSS_TRIPLE" ]; then
+    echo "build lock mismatch: toolchain cross triple '${CROSS_TRIPLE:-}'," \
+        "locked '${UMRK_LOCKED_CROSS_TRIPLE:-}'" >&2
+    exit 1
+fi
+
 jobs="${BUILD_JOBS:-}"
 if [ -z "$jobs" ]; then
     jobs="$(nproc)"

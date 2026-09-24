@@ -2,6 +2,11 @@
   "schema": 1,
   "mlp1_toolchain_image": "ghcr.io/utility-muffin-research-kitchen/mlp1-toolchain@sha256:66aac16fb8b07e663c9b4d66970f272df195a6eba98dfad8286eabbaa617faf9",
   "mlp1_toolchain_image_note": "Digest-pinned published toolchain. The locally built ':local' tag is not a build input: it is produced from an unpinned main checkout and its content can drift between machines. Override TOOLCHAIN_IMAGE only for deliberate toolchain development, never for the distributable lane.",
+  "toolchain": {
+    "platform": "linux/arm64",
+    "cross_triple": "aarch64-buildroot-linux-gnu",
+    "note": "The image's own platform and the cross triple it exports. build-mlp1.sh refuses an image of any other platform, and the container refuses any other triple, so an override image for toolchain development cannot silently build for a different target."
+  },
   "flags": {
     "project": "Utility-Muffin-Research-Kitchen/mlp1-toolchain",
     "commit": "4a34497d90654bb4478852ccd99452ab2889de0f",
@@ -23,5 +28,135 @@
       }
     ],
     "note": "Replaces the sibling ../mlp1-toolchain/flags mount: an arbitrary local checkout is not reproducible. The archive hash is the size/SHA receipt for one fetch of the pinned commit; GitHub tarballs are re-encoded occasionally (observed 2026-09-20: 12095 bytes via the API, 12081 via the web URL, identical extracted contents), so the file rows below are the authoritative check and a drifted receipt alone never blocks the build."
+  },
+  "submodules": {
+    "note": "Every submodule of the pinned upstream commit, recursively, as git submodule status --recursive reports it after fetch-upstream.sh. The build fails if any is missing, extra, at another commit, or not checked out at the recorded commit.",
+    "entries": [
+      {
+        "path": "core/deps/DreamPicoPort-API",
+        "sha": "e06d9f6c59833fc7bb7f2a33c960614489811ef8"
+      },
+      {
+        "path": "core/deps/DreamPicoPort-API/ext/libusb-cmake",
+        "sha": "000e06eb241927db0f34e6867637d39b849ab989"
+      },
+      {
+        "path": "core/deps/SDL",
+        "sha": "00d4f1c2c4ad2dc95d26b18743541f57b1dca56d"
+      },
+      {
+        "path": "core/deps/Spout",
+        "sha": "2110a918e720688f3cb2118302fd153db8745ace"
+      },
+      {
+        "path": "core/deps/Syphon",
+        "sha": "53ec412a78b246c84cedcb4a2a5b92852704d61d"
+      },
+      {
+        "path": "core/deps/Vulkan-Headers",
+        "sha": "b5c8f996196ba4aa6d8f97e52b5d3b6e70f7e4e2"
+      },
+      {
+        "path": "core/deps/VulkanMemoryAllocator",
+        "sha": "1d8f600fd424278486eade7ed3e877c99f0846b1"
+      },
+      {
+        "path": "core/deps/asio",
+        "sha": "d3402006e84efb6114ff93e4f2b8508412ed80d5"
+      },
+      {
+        "path": "core/deps/breakpad",
+        "sha": "1ab24bcc817ebe629bf77daa53529d02361cb1e9"
+      },
+      {
+        "path": "core/deps/discord-rpc",
+        "sha": "c62c34d37cd90b75187a1212e13ce4145bafbdd7"
+      },
+      {
+        "path": "core/deps/discord-rpc/thirdparty/rapidjson",
+        "sha": "8261c1ddf43f10de00fd8c9a67811d1486b2c784"
+      },
+      {
+        "path": "core/deps/discord-rpc/thirdparty/rapidjson/thirdparty/gtest",
+        "sha": "ba96d0b1161f540656efdaed035b3c062b60e006"
+      },
+      {
+        "path": "core/deps/freetype",
+        "sha": "0a0221a1347e2f1e07c395263540026e9a0aa7c7"
+      },
+      {
+        "path": "core/deps/freetype/subprojects/dlg",
+        "sha": "395ccad2c1e0daae535c4d20bb0a3f2424648e17"
+      },
+      {
+        "path": "core/deps/gamesdk",
+        "sha": "4ac9952e6a5b3e0846003cb156b4a664178b7549"
+      },
+      {
+        "path": "core/deps/glslang",
+        "sha": "fc9889c889561c5882e83819dcaffef5ed45529b"
+      },
+      {
+        "path": "core/deps/googletest",
+        "sha": "e39786088138f2749d64e9e90e0f9902daa77c40"
+      },
+      {
+        "path": "core/deps/libadrenotools",
+        "sha": "8fae8ce254dfc1344527e05301e43f37dea2df80"
+      },
+      {
+        "path": "core/deps/libadrenotools/lib/linkernsbypass",
+        "sha": "aa3975893d83ef1bc84c321ec60c65fbf1287887"
+      },
+      {
+        "path": "core/deps/libchdr",
+        "sha": "5f82799f2c8cad1e9cd26d39a0f8d36369a5534b"
+      },
+      {
+        "path": "core/deps/libjuice",
+        "sha": "77daa8befd828046169adbb012d8de928bfdcdd4"
+      },
+      {
+        "path": "core/deps/luabridge",
+        "sha": "5d21e35633a1f87ed08af115b07d3386096f792b"
+      },
+      {
+        "path": "core/deps/luabridge/third_party/gtest",
+        "sha": "58f3f1005cffce8a9d005d0361d3471cd9947501"
+      },
+      {
+        "path": "core/deps/oboe",
+        "sha": "a81bb9f87d4105b84b682685d3bfbb5beca371d1"
+      },
+      {
+        "path": "core/deps/rcheevos",
+        "sha": "3106e6d3d274b63c59976cb07dda94a292ab45ca"
+      },
+      {
+        "path": "core/deps/tinygettext",
+        "sha": "41572a67f96013691685a38f0032f3c97aa34f79"
+      },
+      {
+        "path": "core/deps/tinygettext/external/tinycmmc",
+        "sha": "9a51e13802d930feb7261ba8876940659b258cb7"
+      },
+      {
+        "path": "core/deps/websocketpp",
+        "sha": "1b11fd301531e6df35a6107c1e8665b1e77a2d8e"
+      },
+      {
+        "path": "core/deps/xbyak",
+        "sha": "0d67fd1530016b7c56f3cd74b3fca920f4c3e2b4"
+      }
+    ]
+  },
+  "patches": {
+    "note": "The MLP1 patch series, in application order (the C-locale sort of patches/*.patch). fetch-upstream.sh refuses to touch the source tree unless the directory holds exactly these files with exactly these hashes; a patch added, removed, renamed or edited without updating this list fails the build.",
+    "entries": [
+      {
+        "path": "patches/0001-mlp1-rotate-imgui.patch",
+        "sha256": "1d88c0bf64e93747df25944091316f11553e82cf34a3af9040709e0ff7eca42c"
+      }
+    ]
   }
 }

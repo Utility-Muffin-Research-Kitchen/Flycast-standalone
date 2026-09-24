@@ -36,6 +36,12 @@ jobs:
       # builds in the digest-pinned image, assembles the payload, and runs the
       # package verifier. Calling `make verify-mlp1` or `make verify-package-mlp1`
       # would rebuild, because both Makefile targets depend on build-mlp1.
+      # Host-only: the lock enforcement itself (patch series, submodules,
+      # toolchain platform and triple) rejects every kind of drift, and the
+      # build scripts run it before touching the source or starting a build.
+      - name: Build lock enforcement
+        run: make build-lock-test
+
       - name: Build the locked MLP1 payload
         run: make package-mlp1
 
@@ -59,11 +65,15 @@ jobs:
       - name: Verify the assembled package
         run: ./scripts/verify-mlp1-package.sh
 
+      - name: Package version gate
+        run: make package-version-test
+
       - name: Show the locked binary identity
         run: |
           binary=output/mlp1/build/bin/flycast
           printf 'binary_sha256=%s\n' "$(sha256sum "$binary" | awk '{print $1}')"
-          jq -r '"upstream_tag=" + .upstream_tag,
+          jq -r '"package_version=" + .package_version,
+                 "upstream_tag=" + .upstream_tag,
                  "upstream_sha=" + .upstream_sha,
                  "toolchain_image_id=" + .toolchain_image_id' \
             output/mlp1/build/build-manifest.json
