@@ -495,10 +495,10 @@ index e5000cf7..2a90bdf8 100644
  // configuration could not be saved, in which case nothing was accepted and
  // the failure has already been reported.
 diff --git a/core/achievements/ra_account_bridge.cpp b/core/achievements/ra_account_bridge.cpp
-index 88e12362..36a40fe9 100644
+index 5a682748..5670aada 100644
 --- a/core/achievements/ra_account_bridge.cpp
 +++ b/core/achievements/ra_account_bridge.cpp
-@@ -373,6 +373,13 @@ void reportLoginFailure(const std::string& reason, const std::string& detail)
+@@ -389,6 +389,13 @@ void reportLoginFailure(const std::string& reason, const std::string& detail)
  			detail.empty() ? reason : detail);
  }
  
