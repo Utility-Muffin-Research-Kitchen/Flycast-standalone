@@ -69,6 +69,10 @@ if ! grep -F -A1 'const bool achievementsView = achievements::isActive()' "$MENU
 fi
 echo "route status: shown in the achievements list view"
 
+# Run the real notifier transitions without an ImGui renderer. Startup
+# progress/login messages must not erase the mandatory Hardcore-host notice.
+python3 "$ROOT_DIR/tests/achievement-notice-test.py"
+
 # Request URLs from the pinned rcheevos for the session host. gnu99, not c99:
 # rcheevos uses POSIX strdup/strncasecmp, which strict C99 hides on glibc.
 # No -Werror here: most of what this compiles is third-party rcheevos.

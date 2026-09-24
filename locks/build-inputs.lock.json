@@ -168,6 +168,10 @@
       {
         "path": "patches/0003-mlp1-ra-route.patch",
         "sha256": "f41881b05f521b7356ec3886664645888ce179f1c2a2c0ac4db36eadcd67167d"
+      },
+      {
+        "path": "patches/0004-retain-achievement-error-notices.patch",
+        "sha256": "7e8541f685ff48617d71e1fd772cce44357ece8d687f41c5377c27969a541057"
       }
     ]
   }
