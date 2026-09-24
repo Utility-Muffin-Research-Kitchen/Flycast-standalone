@@ -262,6 +262,18 @@ def scenario_baseline(accepted_a: Card) -> None:
     check(run.get("config_established") == "yes", "baseline: a missing emu.cfg is not a fresh configuration")
     check(run.get("status") == "accepted", f"baseline: fresh configuration status {run.get('status')!r}")
 
+    # P3 owns direct credential verification before using a custom session
+    # host. The bridge must prepare the import instead of refusing it early.
+    custom = accepted_a.fork()
+    path = os.path.join(custom.path, CFG)
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read().replace("[achievements]\n", "[achievements]\nHostUrl = http://custom.invalid\n")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    expect_fresh_import("baseline: changed account with custom host", custom, ACCOUNT_B, 2, ACCOUNT_B[2])
+    check(cfg_keys(custom.path).get("HostUrl") == "http://custom.invalid",
+          "baseline: direct verification changed the saved custom host")
+
 
 def scenario_pending_marker(accepted_a: Card) -> None:
     for op, mode in WRITE_FAULTS:

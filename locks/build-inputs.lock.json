@@ -172,6 +172,10 @@
       {
         "path": "patches/0004-retain-achievement-error-notices.patch",
         "sha256": "7e8541f685ff48617d71e1fd772cce44357ece8d687f41c5377c27969a541057"
+      },
+      {
+        "path": "patches/0005-verify-managed-passwords-directly.patch",
+        "sha256": "28a3f794676af76b03a7e4ac78ce56bb86895db8c53caffafccdc2ed93353da1"
       }
     ]
   }

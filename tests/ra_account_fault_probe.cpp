@@ -5,8 +5,9 @@
 //
 // The sequence is the device's: open emu.cfg, load the achievement options,
 // ra_account::import(), then the login Achievements::init() would start and
-// the callback path its result takes (clientManagedLoginCallback,
-// clientLoginWithTokenCallback). The network is simulated by the command
+// the bridge persistence and bounded retry decisions used by the callbacks.
+// ra-session-login-test.py executes the real callback/host-switch methods.
+// The network is simulated by the command
 // line: --login / --token-login / --retry-login choose each answer.
 //
 // Output is secret-free KEY=VALUE lines. Tokens are shown only as a short
