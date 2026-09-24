@@ -43,6 +43,32 @@ if [ "$(grep -c 'settingsKnown' "$ACHIEVEMENTS_SOURCE")" -ne 2 ]; then
 fi
 echo "route wiring: settingsKnown comes from the configuration store"
 
+# The session's status ("Achievements unavailable. Unlocks will not be
+# queued.", "... Unlocks are not being queued.") belongs in the achievements
+# list view too, not only under Settings > General. An unavailable session has
+# no running client, so the pause menu must still open the list when there is
+# a status to show, and the list must not ask a missing client for entries.
+# (ImGui does not run on the host; the MLP1 build compiles this code.)
+LIST_SOURCE="$SOURCE_DIR/core/ui/gui_achievements.cpp"
+MENU_SOURCE="$SOURCE_DIR/core/ui/gui.cpp"
+list_view="$(awk '/^void achievementList\(\)/,/^}/' "$LIST_SOURCE")"
+for wiring in \
+    'const std::string routeStatus = routeStatusLine();' \
+    'ImGui::TextWrapped("%s", routeStatus.c_str());' \
+    'if (!isActive()) {'; do
+    if ! printf '%s\n' "$list_view" | grep -F "$wiring" >/dev/null; then
+        echo "FAIL achievements list: achievementList() lacks: $wiring" >&2
+        exit 1
+    fi
+done
+if ! grep -F -A1 'const bool achievementsView = achievements::isActive()' "$MENU_SOURCE" |
+        grep -F '|| !achievements::routeStatusLine().empty();' >/dev/null ||
+   ! grep -F 'DisabledScope _{!achievementsView};' "$MENU_SOURCE" >/dev/null; then
+    echo "FAIL achievements list: the pause menu does not open the list for a route status" >&2
+    exit 1
+fi
+echo "route status: shown in the achievements list view"
+
 # Request URLs from the pinned rcheevos for the session host. gnu99, not c99:
 # rcheevos uses POSIX strdup/strncasecmp, which strict C99 hides on glibc.
 # No -Werror here: most of what this compiles is third-party rcheevos.

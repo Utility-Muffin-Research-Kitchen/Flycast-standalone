@@ -477,7 +477,7 @@ index 5420783e..e23a20c3 100644
  	NOTICE_LOG(COMMON, "RA: game %d loaded: %s, achievements %d leaderboards %d rich presence %d", info->id, info->title,
  			rc_client_has_achievements(rc_client), rc_client_has_leaderboards(rc_client), rc_client_has_rich_presence(rc_client));
 diff --git a/core/achievements/achievements.h b/core/achievements/achievements.h
-index ced0969f..29009663 100644
+index ced0969f..7e6de0e6 100644
 --- a/core/achievements/achievements.h
 +++ b/core/achievements/achievements.h
 @@ -56,6 +56,23 @@ std::vector<Achievement> getAchievementList();
@@ -504,6 +504,16 @@ index ced0969f..29009663 100644
  #else
  
  static inline bool isActive() {
+@@ -64,6 +81,9 @@ static inline bool isActive() {
+ static inline bool canPause() {
+ 	return true;
+ }
++static inline std::string routeStatusLine() {
++	return {};
++}
+ 
+ #endif
+ 
 diff --git a/core/achievements/ra_account.h b/core/achievements/ra_account.h
 index e5000cf7..2a90bdf8 100644
 --- a/core/achievements/ra_account.h
@@ -950,10 +960,26 @@ index 47e017e3..22a47895 100644
  		os_CreateWindow();
  		os_SetupInput();
 diff --git a/core/ui/gui.cpp b/core/ui/gui.cpp
-index cb77cbe3..6d16c1f4 100644
+index cb77cbe3..18925a51 100644
 --- a/core/ui/gui.cpp
 +++ b/core/ui/gui.cpp
-@@ -1281,6 +1281,13 @@ static void gui_display_loadscreen()
+@@ -607,9 +607,13 @@ static void gui_display_commands()
+ 		}
+ 		// Achievements
+ 		{
+-			DisabledScope _{!achievements::isActive()};
++			// UMRK: a Leaf-routed session whose achievements are unavailable
++			// or not queued still opens the list, which then says so.
++			const bool achievementsView = achievements::isActive()
++					|| !achievements::routeStatusLine().empty();
++			DisabledScope _{!achievementsView};
+ 
+-			if (IconButton(ICON_FA_TROPHY, T("Achievements"), ScaledVec2(buttonWidth, 50)).realize() && achievements::isActive())
++			if (IconButton(ICON_FA_TROPHY, T("Achievements"), ScaledVec2(buttonWidth, 50)).realize() && achievementsView)
+ 				gui_setState(GuiState::Achievements);
+ 		}
+ 		// Barcode
+@@ -1281,6 +1285,13 @@ static void gui_display_loadscreen()
  				}
  				else
  				{
@@ -967,7 +993,7 @@ index cb77cbe3..6d16c1f4 100644
  					gui_setState(GuiState::Closed);
  					ImGui::Text("%s", label);
  				}
-@@ -1333,6 +1340,104 @@ static void gui_display_loadscreen()
+@@ -1333,6 +1344,104 @@ static void gui_display_loadscreen()
      ImGui::End();
  }
  
@@ -1072,7 +1098,7 @@ index cb77cbe3..6d16c1f4 100644
  void gui_display_ui()
  {
  	FC_PROFILE_SCOPE;
-@@ -1400,6 +1505,11 @@ void gui_display_ui()
+@@ -1400,6 +1509,11 @@ void gui_display_ui()
  	case GuiState::NetworkStart:
  		gui_network_start();
  		break;
@@ -1096,6 +1122,43 @@ index e5b897fd..3f2e41ec 100644
  	Cheats,
  	Achievements,
  };
+diff --git a/core/ui/gui_achievements.cpp b/core/ui/gui_achievements.cpp
+index cf55fa7a..2382def5 100644
+--- a/core/ui/gui_achievements.cpp
++++ b/core/ui/gui_achievements.cpp
+@@ -296,9 +296,10 @@ void achievementList()
+ 		ImGui::PushFont(nullptr, uiLargeFontSize());
+ 		ImGui::Text("%s", game.title.c_str());
+ 		ImGui::PopFont();
+-		std::string str = strprintf(T("You have unlocked %d of %d achievements and %d of %d points."),
+-				game.unlockedAchievements, game.totalAchievements, game.points, game.totalPoints);
++		if (isActive())
+ 		{
++			std::string str = strprintf(T("You have unlocked %d of %d achievements and %d of %d points."),
++					game.unlockedAchievements, game.totalAchievements, game.points, game.totalPoints);
+ 			ImguiStyleColor _(ImGuiCol_Text, ImVec4(0.75f, 0.75f, 0.75f, 1.f));
+ 			ImGui::TextWrapped("%s", str.c_str());
+ 		}
+@@ -312,6 +313,19 @@ void achievementList()
+ 			gui_setState(GuiState::Commands);
+     }
+ 
++	// UMRK: how this Leaf-routed session reaches RetroAchievements, and
++	// whether unlocks are queued ("Achievements unavailable. Unlocks will not
++	// be queued.", "Leaf's offline service is unreachable. Unlocks are not
++	// being queued."), shown with the list it applies to.
++	const std::string routeStatus = routeStatusLine();
++	if (!routeStatus.empty())
++		ImGui::TextWrapped("%s", routeStatus.c_str());
++	// Without a running client there is no list to ask for.
++	if (!isActive()) {
++		ImGui::End();
++		return;
++	}
++
+ 	// ImGuiWindowFlags_NavFlattened prevents the child window from getting the focus and thus the list can't be scrolled with a keyboard or gamepad.
+ 	if (ImGui::BeginChild(ImGui::GetID("ach_list"), ImVec2(0, 0), ImGuiChildFlags_Borders, ImGuiWindowFlags_DragScrolling))
+ 	{
 diff --git a/core/ui/settings_general.cpp b/core/ui/settings_general.cpp
 index a4b43810..0a89e7ed 100644
 --- a/core/ui/settings_general.cpp

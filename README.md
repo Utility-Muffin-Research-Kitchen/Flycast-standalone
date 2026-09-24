@@ -81,11 +81,23 @@ replacing the whole file with the three account keys. A marker that exists but
 cannot be read counts as managed state that cannot be trusted, never as no
 marker.
 
+A Leaf launch also carries `UMRK_FLYCAST_RA_ROUTE`, the launcher's intent for
+its offline achievements service. Flycast decides the session's route once the
+content and its per-game settings are loaded: no authentication when the
+settings could not be read (an unreadable `emu.cfg`), when achievements are
+off or when there is no usable account; RetroAchievements directly for
+Hardcore; the player's own custom host; otherwise Leaf's service after a
+bounded check of `127.0.0.1:8080/leaf/health`, with Retry, Cancel and Play
+Anyway when it is not ready. Whether unlocks are being queued is shown under
+Settings > General and in the achievements list, which the pause menu opens
+for a routed session even when achievements are unavailable.
+
 Host checks:
 
 ```sh
 make ra-account-contract-test
 make ra-account-fault-test
+make ra-route-test
 make smoke-launch-wrapper
 ```
 

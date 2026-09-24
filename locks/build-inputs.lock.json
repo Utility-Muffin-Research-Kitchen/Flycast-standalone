@@ -167,7 +167,7 @@
       },
       {
         "path": "patches/0003-mlp1-ra-route.patch",
-        "sha256": "976a5ba0cf33c1b4dd063f09a57fb530b04c027054e5e4862cb110b0daba1efe"
+        "sha256": "f41881b05f521b7356ec3886664645888ce179f1c2a2c0ac4db36eadcd67167d"
       }
     ]
   }
