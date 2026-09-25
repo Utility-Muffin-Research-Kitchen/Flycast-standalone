@@ -51,6 +51,58 @@ those UI vertices to the portrait-mounted KMS framebuffer. Gameplay continues
 to use Flycast's existing `rend.Rotate90` renderer path, so opening the native
 menu does not add a full-frame rotation copy to normal emulation.
 
+## RetroAchievements account
+
+The RetroAchievements account is Leaf's, not this emulator's. Jawaka resolves
+the account saved in its own Settings > Games > Accounts and exports one
+`standalone-ra-account-v1` snapshot to an authorized Flycast launch; this
+package carries the `ra-account-v1` capability record that makes Jawaka
+willing to send it. There is no second login screen, and nothing here needs
+RAOfflineProxy, RetroArch or a shared token store.
+
+Flycast consumes the snapshot in `flycast_init()`, before anything starts the
+achievement client, then authenticates through its own rcheevos password
+login and stores the resulting token in its own `emu.cfg`. Which revision it
+actually committed is recorded beside that file in `.umrk-ra-account`, a small
+versioned marker holding the account name, the target revision and a
+pending/accepted/signed-out transition -- never a password or a token. Saving,
+changing or clearing the account in Leaf takes effect on the next launch.
+
+The wrapper scrubs the snapshot from its own environment on entry and
+re-exports it only for the emulator exec, so no helper it runs can read the
+password, and the account never reaches argv, the log or `env.sh`. RetroArch's
+own credential handoff (`JAWAKA_CHEEVOS_*`) has no place in a standalone
+launch: the wrapper drops its values on entry and passes Flycast only the fact
+that it was present, which Flycast reports as `stale-retroarch-credentials`.
+
+If `emu.cfg` exists but cannot be read, Flycast's settings are unknown: the
+import writes nothing, authenticates nothing and reports it, rather than
+replacing the whole file with the three account keys. A marker that exists but
+cannot be read counts as managed state that cannot be trusted, never as no
+marker.
+
+Host checks:
+
+```sh
+make ra-account-contract-test
+make ra-account-fault-test
+make smoke-launch-wrapper
+```
+
+The first replays the shared fixtures from public `leaf-contracts`, at the
+revision pinned in `locks/contracts.lock.json`, through the emulator's own
+classifier, and exercises the marker and every account transition including
+the write failures. The second compiles the real account bridge and
+configuration store against small host stand-ins (`tests/host-stubs`) with an
+`fopen`/`fwrite`/`fflush`/`fsync`/`fclose`/`rename` fault shim, then fails and
+interrupts every account write at each boundary (pending marker, configuration
+save, accepted marker), with read-only, storage-exhausted and I/O errors, plus
+corrupt and unreadable markers, an unreadable `emu.cfg`, a failing log writer
+and the login callbacks' failure paths. It asserts that no revision is accepted
+without its token, the previous `emu.cfg` survives, and the previously
+imported account never comes back. The third proves the wrapper's handoff and
+scrubbing.
+
 Flycast's compile-time debug logger is disabled. Its high-frequency CPU and
 GD-ROM trace stream can otherwise write more than a megabyte per second to the
 SD card and cause audio underruns that do not occur in a release build.

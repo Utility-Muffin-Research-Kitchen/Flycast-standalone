@@ -5,12 +5,16 @@ TOOLCHAIN_IMAGE ?= $(shell python3 -c 'import json; print(json.load(open("locks/
 BUILD_JOBS ?=
 MLP1_BUILD_PROFILE ?= perf
 
-.PHONY: build-mlp1 fetch-upstream package-mlp1 verify-mlp1 \
-	verify-package-mlp1 smoke-launch-wrapper build-lock-test \
-	package-version-test dist-source test-dist-source clean
+.PHONY: build-mlp1 fetch-upstream fetch-contract-fixtures package-mlp1 \
+	verify-mlp1 verify-package-mlp1 smoke-launch-wrapper build-lock-test \
+	package-version-test ra-account-contract-test ra-account-fault-test \
+	dist-source test-dist-source clean
 
 fetch-upstream:
 	./scripts/fetch-upstream.sh
+
+fetch-contract-fixtures:
+	./scripts/fetch-contract-fixtures.sh
 
 build-mlp1:
 	DOCKER="$(DOCKER)" \
@@ -47,5 +51,11 @@ dist-source: fetch-upstream
 test-dist-source: dist-source
 	bash scripts/dist-source-test.sh
 
+ra-account-contract-test:
+	./scripts/ra-account-contract-test.sh
+
+ra-account-fault-test:
+	./scripts/ra-account-fault-test.sh
+
 clean:
-	rm -rf output/mlp1
+	rm -rf output/mlp1 output/host

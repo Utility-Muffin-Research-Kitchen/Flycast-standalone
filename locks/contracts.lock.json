@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "leaf_contracts": {
+    "project": "Utility-Muffin-Research-Kitchen/leaf-contracts",
+    "commit": "f7c25c6b27ac79beb9ee08b0b4fdde54375df081",
+    "commit_note": "standalone-ra-account-v1 at leaf-contracts main, where PR #9 merged. Bump it only as a reviewed change; the consumer must never follow a moving branch.",
+    "raw_url_prefix": "https://raw.githubusercontent.com/Utility-Muffin-Research-Kitchen/leaf-contracts",
+    "files": [
+      {
+        "path": "contracts/leaf-services/standalone-ra-account-v1/fixtures.json",
+        "sha256": "981a98efb4f55598918e410d6a443fb2ddf0330e2ee46138175b9cb53d18d534"
+      }
+    ]
+  }
+}
