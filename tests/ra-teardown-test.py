@@ -49,6 +49,9 @@ if order != sorted(order):
 print("teardown wiring: RA tasks run in a cancel scope; stopThreads() cancels before draining")
 
 program = r'''
+// The real curl section relies on includes upstream gets from its own headers.
+#include <cctype>
+#include <cstring>
 #include "oslib/http_client.h"
 #include "util/worker_thread.h"
 #include <arpa/inet.h>
