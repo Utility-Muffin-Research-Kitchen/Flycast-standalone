@@ -28,16 +28,18 @@ file "$BINARY" | grep -q 'ELF 64-bit LSB.*ARM aarch64'
         # libraries through it (checked below against the real device).
         "$CROSS_TRIPLE-readelf" -d "$binary" |
             grep -F "Shared library: [libcurl.so.4]" >/dev/null
-
-        # Achievements compiled in, not merely available upstream.
-        "$CROSS_TRIPLE-strings" -a "$binary" | grep -F "retroachievements.org" >/dev/null
-
-        # The Leaf account bridge: the contract variables it reads and the
-        # marker it writes beside emu.cfg.
-        "$CROSS_TRIPLE-strings" -a "$binary" | grep -F "UMRK_RA_ACCOUNT_VERSION" >/dev/null
-        "$CROSS_TRIPLE-strings" -a "$binary" | grep -F "UMRK_RA_ACCOUNT_PASSWORD" >/dev/null
-        "$CROSS_TRIPLE-strings" -a "$binary" | grep -F "umrk-ra-account" >/dev/null
     '
+
+# Achievements compiled in, and the binary and its capability records in
+# agreement: the account bridge (contract variables, marker) behind
+# ra-account-v1, the session route (UMRK_FLYCAST_RA_ROUTE, the fixed
+# /leaf/health endpoint and session host) behind ra-route-v1. Checked against
+# the records the package is built from and, once assembled, the package's own.
+record_dirs=("$ROOT_DIR/config/mlp1")
+if [ -f "$ROOT_DIR/output/mlp1/flycast/manifest.json" ]; then
+    record_dirs+=("$ROOT_DIR/output/mlp1/flycast")
+fi
+python3 "$ROOT_DIR/scripts/check-binary-capabilities.py" "$BINARY" "${record_dirs[@]}"
 
 if command -v adb >/dev/null 2>&1; then
     if [ -n "${ADB_SERIAL:-}" ]; then

@@ -19,6 +19,7 @@ for path in \
     "$PACKAGE_DIR/defaults/config.version" \
     "$PACKAGE_DIR/defaults/SDL_Loong Gamepad.cfg" \
     "$PACKAGE_DIR/ra-account-v1" \
+    "$PACKAGE_DIR/ra-route-v1" \
     "$PACKAGE_DIR/licenses/Flycast-GPL-2.0.txt" \
     "$PACKAGE_DIR/licenses/THIRD-PARTY-NOTICES.txt" \
     "$PACKAGE_DIR/provenance/build-manifest.json" \
@@ -52,6 +53,13 @@ if [ "$(cat "$PACKAGE_DIR/ra-account-v1")" != "standalone-ra-account-v1" ]; then
     echo "ra-account-v1 capability record does not name the contract" >&2
     exit 1
 fi
+if [ "$(cat "$PACKAGE_DIR/ra-route-v1")" != "umrk-flycast-ra-route-v1" ]; then
+    echo "ra-route-v1 capability record does not name the route capability" >&2
+    exit 1
+fi
+# ... and the packaged binary must actually contain what the records promise.
+python3 "$ROOT_DIR/scripts/check-binary-capabilities.py" \
+    "$PACKAGE_DIR/bin/flycast" "$PACKAGE_DIR"
 
 jq -e '
     .id == "flycast_standalone" and

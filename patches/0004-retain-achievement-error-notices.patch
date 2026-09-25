@@ -1,0 +1,40 @@
+diff --git a/core/ui/gui_achievements.h b/core/ui/gui_achievements.h
+--- a/core/ui/gui_achievements.h
++++ b/core/ui/gui_achievements.h
+@@ -48,6 +48,7 @@
+ 	bool draw();
+ 
+ private:
++	bool errorPendingDraw = false;
+ 	u64 startTime = 0;
+ 	u64 endTime = 0;
+ 	Type type = Type::None;
+diff --git a/core/ui/gui_achievements.cpp b/core/ui/gui_achievements.cpp
+--- a/core/ui/gui_achievements.cpp
++++ b/core/ui/gui_achievements.cpp
+@@ -48,6 +48,11 @@
+ 	verify(type != Challenge && type != Leaderboard);
+ 	std::lock_guard<std::mutex> _(mutex);
+ 	u64 now = getTimeMs();
++	// Startup progress and login callbacks must not hide a required notice.
++	if (this->type == Error && (errorPendingDraw || now < endTime)
++			&& (type == Login || type == GameLoaded || type == Progress))
++		return;
++	errorPendingDraw = type == Error;
+ 	if (type == Progress)
+ 	{
+ 		if (!text1.empty())
+@@ -138,6 +143,13 @@
+ 	if (type == None)
+ 		return false;
+ 	u64 now = getTimeMs();
++	if (errorPendingDraw)
++	{
++		// Loading may take longer than DISPLAY_TIME before the first frame.
++		startTime = now;
++		endTime = now + DISPLAY_TIME;
++		errorPendingDraw = false;
++	}
+ 	if (now > endTime + END_ANIM_TIME)
+ 	{
+ 		if (!leaderboards.empty())

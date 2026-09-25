@@ -45,7 +45,12 @@ jobs:
       - name: Build the locked MLP1 payload
         run: make package-mlp1
 
-      - name: Verify the ELF, achievements and HTTPS linkage
+      # The checker behind the next step rejects a binary that lacks what its
+      # capability records promise (account bridge, session route).
+      - name: Capability record checks
+        run: make binary-capabilities-test
+
+      - name: Verify the ELF, achievements, route and HTTPS linkage
         run: ./scripts/verify-mlp1-binary.sh
 
       - name: Verify launch wrapper handoff and scrubbing
@@ -76,6 +81,17 @@ jobs:
 
       - name: Complete source archive and offline payload reproduction
         run: make test-dist-source
+
+      # Patch 0003's route policy, bounded health check against a fake
+      # service, and the rcheevos request URLs for the session host.
+      - name: Session route checks
+        run: |
+          # The teardown test compiles the real curl client on the host.
+          dpkg -s libcurl4-openssl-dev >/dev/null 2>&1 || {
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev
+          }
+          make ra-route-test
 
       - name: Show the locked binary identity
         run: |
