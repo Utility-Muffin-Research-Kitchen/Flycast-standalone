@@ -8,19 +8,38 @@ ARTIFACT_DIR=/build/output/mlp1/build
 # shellcheck source=/dev/null
 . /umrk-flags/mlp1-build-flags.env
 
+# build-mlp1.sh passes the triple the lock records; the image exports its own.
+if [ -z "${UMRK_LOCKED_CROSS_TRIPLE:-}" ] ||
+   [ "${CROSS_TRIPLE:-}" != "$UMRK_LOCKED_CROSS_TRIPLE" ]; then
+    echo "build lock mismatch: toolchain cross triple '${CROSS_TRIPLE:-}'," \
+        "locked '${UMRK_LOCKED_CROSS_TRIPLE:-}'" >&2
+    exit 1
+fi
+
 jobs="${BUILD_JOBS:-}"
 if [ -z "$jobs" ]; then
     jobs="$(nproc)"
 fi
 
-SOURCE_DATE_EPOCH="$(git -C "$SOURCE_DIR" show -s --format=%ct HEAD)"
+# The same locked identity is used with and without Git metadata.
+. /build/upstream.env
+SOURCE_DATE_EPOCH="$FLYCAST_SOURCE_DATE_EPOCH"
 export SOURCE_DATE_EPOCH
 
 mkdir -p "$BUILD_DIR" "$ARTIFACT_DIR/bin" "$ARTIFACT_DIR/provenance"
 
+# Build from scratch every time. cmake --fresh regenerates the build system but
+# leaves object files, so an earlier build with a different toolchain image can
+# be relinked into the distributable binary. That is not hypothetical: a stale
+# object compiled with the locally tagged image left a second GCC identifier in
+# .comment. A clean tree is what "two clean builds must match" means.
+rm -rf "$BUILD_DIR"
+
 # Flycast's ENABLE_LOG emits high-frequency SH4/REIOS debug events. On the
 # MLP1, redirecting that stream to the SD card is enough to disrupt audio.
 cmake -S "$SOURCE_DIR" -B "$BUILD_DIR" --fresh \
+    -DFLYCAST_BUILD_VERSION="$FLYCAST_UPSTREAM_TAG" \
+    -DFLYCAST_BUILD_COMMIT="${FLYCAST_UPSTREAM_SHA:0:8}" \
     -DCMAKE_TOOLCHAIN_FILE="$CMAKE_TOOLCHAIN_FILE" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_FLAGS_RELEASE="$UMRK_MLP1_PROFILE_CFLAGS" \
@@ -47,8 +66,11 @@ cmake --build "$BUILD_DIR" --parallel "$jobs"
 install -m 0755 "$BUILD_DIR/flycast" "$ARTIFACT_DIR/bin/flycast"
 
 cmake -LAH -N "$BUILD_DIR" >"$ARTIFACT_DIR/provenance/cmake-cache.txt"
-git -C "$SOURCE_DIR" submodule status --recursive \
-    >"$ARTIFACT_DIR/provenance/submodules.txt"
+python3 - /build/locks/build-inputs.lock.json >"$ARTIFACT_DIR/provenance/submodules.txt" <<'PY'
+import json, sys
+for row in json.load(open(sys.argv[1]))["submodules"]["entries"]:
+    print(f" {row['sha']} {row['path']}")
+PY
 find /build/patches -maxdepth 1 -type f -name '*.patch' -print0 |
     LC_ALL=C sort -z |
     while IFS= read -r -d '' patch; do

@@ -57,7 +57,7 @@ install_license() {
 
 install_license "$SOURCE_DIR/core/deps/breakpad/LICENSE" "Breakpad-BSD-3-Clause.txt"
 install_license "$SOURCE_DIR/core/deps/DreamPicoPort-API/LICENSE" "DreamPicoPort-MIT.txt"
-install_license "$SOURCE_DIR/core/deps/libusb-cmake/libusb/COPYING" "libusb-LGPL-2.1.txt"
+install_license "$SOURCE_DIR/core/deps/DreamPicoPort-API/ext/libusb-cmake/libusb/COPYING" "libusb-LGPL-2.1.txt"
 install_license "$SOURCE_DIR/core/deps/xxHash/LICENSE" "xxHash-BSD-2-Clause.txt"
 install_license "$SOURCE_DIR/core/deps/glm/copying.txt" "GLM-License.txt"
 install_license "$SOURCE_DIR/core/deps/libchdr/LICENSE.txt" "libchdr-BSD-3-Clause.txt"

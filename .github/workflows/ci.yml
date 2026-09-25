@@ -1,0 +1,97 @@
+name: ci
+
+# Builds the pinned Flycast binary in the digest-pinned public toolchain image
+# and runs the host checks. This is the independent arm64 build the
+# reproducibility gate needs: the runner starts from a bare clone of this
+# repository, pulls only public inputs, and needs no UMRK workspace, sibling
+# checkout, device, or account.
+#
+# This is ordinary CI only. It runs on pushes to main and on pull requests, and
+# never cuts a tag or publishes an artifact to a release. A deliberate release
+# workflow is a separate concern owned by the content-pak delivery (F3); it must
+# not be folded into this file.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build and host checks
+    # Native arm64 runner: the toolchain image is published for linux/arm64, so
+    # the build runs without QEMU and matches the device architecture.
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # One build drives every check. `package-mlp1` fetches the pinned upstream
+      # source and submodules, fetches and hash-verifies the locked build flags,
+      # builds in the digest-pinned image, assembles the payload, and runs the
+      # package verifier. Calling `make verify-mlp1` or `make verify-package-mlp1`
+      # would rebuild, because both Makefile targets depend on build-mlp1.
+      # Host-only: the lock enforcement itself (patch series, submodules,
+      # toolchain platform and triple) rejects every kind of drift, and the
+      # build scripts run it before touching the source or starting a build.
+      - name: Build lock enforcement
+        run: make build-lock-test
+
+      - name: Build the locked MLP1 payload
+        run: make package-mlp1
+
+      - name: Verify the ELF, achievements and HTTPS linkage
+        run: ./scripts/verify-mlp1-binary.sh
+
+      - name: Verify launch wrapper handoff and scrubbing
+        run: make smoke-launch-wrapper
+
+      - name: Replay the shared account contract fixtures
+        # The account adapter and its contract test land with the stacked
+        # account-import branch. This workflow is shared, so run the fixtures
+        # only where the target exists.
+        run: |
+          if make -n ra-account-contract-test >/dev/null 2>&1; then
+            make ra-account-contract-test
+          else
+            echo "no standalone-ra-account-v1 consumer on this branch; skipping"
+          fi
+
+      - name: Verify the assembled package
+        run: ./scripts/verify-mlp1-package.sh
+
+      - name: Package version gate
+        run: make package-version-test
+
+      - name: Complete source archive and offline payload reproduction
+        run: make test-dist-source
+
+      - name: Show the locked binary identity
+        run: |
+          binary=output/mlp1/build/bin/flycast
+          printf 'binary_sha256=%s\n' "$(sha256sum "$binary" | awk '{print $1}')"
+          jq -r '"package_version=" + .package_version,
+                 "upstream_tag=" + .upstream_tag,
+                 "upstream_sha=" + .upstream_sha,
+                 "toolchain_image_id=" + .toolchain_image_id' \
+            output/mlp1/build/build-manifest.json
+          sha256sum output/dist/flycast-*-source.tar.gz
+
+      - name: Upload the assembled payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: flycast-mlp1-payload
+          path: output/mlp1/flycast
+          if-no-files-found: error
+
+      - name: Upload the corresponding source
+        uses: actions/upload-artifact@v4
+        with:
+          name: flycast-corresponding-source
+          path: output/dist/flycast-*-source.tar.gz
+          if-no-files-found: error

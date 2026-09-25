@@ -1,12 +1,13 @@
 SHELL := /bin/bash
 
 DOCKER ?= docker
-TOOLCHAIN_IMAGE ?= ghcr.io/utility-muffin-research-kitchen/mlp1-toolchain:local
+TOOLCHAIN_IMAGE ?= $(shell python3 -c 'import json; print(json.load(open("locks/build-inputs.lock.json"))["mlp1_toolchain_image"])')
 BUILD_JOBS ?=
 MLP1_BUILD_PROFILE ?= perf
 
 .PHONY: build-mlp1 fetch-upstream package-mlp1 verify-mlp1 \
-	verify-package-mlp1 smoke-launch-wrapper clean
+	verify-package-mlp1 smoke-launch-wrapper build-lock-test \
+	package-version-test dist-source test-dist-source clean
 
 fetch-upstream:
 	./scripts/fetch-upstream.sh
@@ -31,6 +32,20 @@ verify-package-mlp1:
 
 smoke-launch-wrapper:
 	./scripts/smoke-launch-wrapper.sh
+
+build-lock-test:
+	./scripts/build-lock-test.sh
+
+package-version-test:
+	./scripts/package-version-test.sh
+
+dist-source: fetch-upstream
+	./scripts/fetch-build-inputs.sh
+	python3 scripts/dist-source.py create
+
+# Build package-mlp1 first; this target compares it with a fresh offline build.
+test-dist-source: dist-source
+	bash scripts/dist-source-test.sh
 
 clean:
 	rm -rf output/mlp1

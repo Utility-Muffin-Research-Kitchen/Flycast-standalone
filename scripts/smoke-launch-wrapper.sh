@@ -111,7 +111,8 @@ assert_current_mapping() {
         grep -F "$expected" \
             "$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg" >/dev/null
     done
-    grep -Fx '6' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
+    grep -Fx '7' "$CONFIG_DIR/.umrk-defaults-version" >/dev/null
+    grep -Fx 'PerGameVmu = no' "$CONFIG_DIR/emu.cfg" >/dev/null
 }
 
 assert_current_mapping
@@ -178,6 +179,28 @@ sed -e '/^bind14 = 5:btn_z$/d' \
 printf '5\n' >"$CONFIG_DIR/.umrk-defaults-version"
 run_wrapper
 assert_current_mapping
+
+# A v6 install upgraded to v2.7 keeps its shared VMUs: the missing
+# PerGameVmu line is pinned to the v2.6 default under [config] ...
+grep -v '^PerGameVmu = ' "$CONFIG_DIR/emu.cfg" >"$CONFIG_DIR/emu.cfg.tmp"
+mv "$CONFIG_DIR/emu.cfg.tmp" "$CONFIG_DIR/emu.cfg"
+printf '6\n' >"$CONFIG_DIR/.umrk-defaults-version"
+run_wrapper
+assert_current_mapping
+[ "$(grep -c '^PerGameVmu = ' "$CONFIG_DIR/emu.cfg")" = 1 ]
+awk '/^\[/ { section = $0 } /^PerGameVmu = / { print section }' \
+    "$CONFIG_DIR/emu.cfg" | grep -Fx '[config]' >/dev/null
+
+# ... while a player who chose per-game VMUs keeps that choice.
+sed 's/^PerGameVmu = no$/PerGameVmu = yes/' "$CONFIG_DIR/emu.cfg" \
+    >"$CONFIG_DIR/emu.cfg.tmp"
+mv "$CONFIG_DIR/emu.cfg.tmp" "$CONFIG_DIR/emu.cfg"
+printf '6\n' >"$CONFIG_DIR/.umrk-defaults-version"
+run_wrapper
+grep -Fx 'PerGameVmu = yes' "$CONFIG_DIR/emu.cfg" >/dev/null
+sed 's/^PerGameVmu = yes$/PerGameVmu = no/' "$CONFIG_DIR/emu.cfg" \
+    >"$CONFIG_DIR/emu.cfg.tmp"
+mv "$CONFIG_DIR/emu.cfg.tmp" "$CONFIG_DIR/emu.cfg"
 
 printf '\n[user]\ncustom = preserved\n' >>"$CONFIG_DIR/emu.cfg"
 printf '\n# user mapping edit\n' >>"$CONFIG_DIR/mappings/SDL_Loong Gamepad.cfg"

@@ -174,6 +174,24 @@ if [ "$INSTALLED_VERSION" -lt "$DEFAULTS_VERSION" ]; then
             cp "$ROOT_DIR/defaults/SDL_Loong Gamepad.cfg" "$mapping_file"
         fi
     fi
+    # Version 7 keeps one shared VMU per slot. Flycast v2.7 changed the
+    # PerGameVmu default from no to yes, so after the upgrade every game saw a
+    # blank per-game VMU and offered to create a new file while the player's
+    # saves sat untouched in vmu_save_A1.bin. Pin the v2.6 behavior only when
+    # emu.cfg has no PerGameVmu line; an explicit choice is left alone.
+    if [ "$INSTALLED_VERSION" -lt 7 ] && [ -f "$CONFIG_DIR/emu.cfg" ] &&
+            ! grep -q '^PerGameVmu = ' "$CONFIG_DIR/emu.cfg"; then
+        emu_cfg_new="$CONFIG_DIR/emu.cfg.umrk-new"
+        if awk '
+                { print }
+                $0 == "[config]" && !done { print "PerGameVmu = no"; done = 1 }
+                END { if (!done) { print ""; print "[config]"; print "PerGameVmu = no" } }
+            ' "$CONFIG_DIR/emu.cfg" >"$emu_cfg_new"; then
+            mv "$emu_cfg_new" "$CONFIG_DIR/emu.cfg"
+        else
+            rm -f "$emu_cfg_new"
+        fi
+    fi
     printf '%s\n' "$DEFAULTS_VERSION" >"$INSTALLED_VERSION_FILE"
 fi
 

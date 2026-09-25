@@ -63,6 +63,33 @@ if [ "$manifest_tag" != "$FLYCAST_UPSTREAM_TAG" ] ||
     exit 1
 fi
 
+# The package version: declared once in upstream.env, exactly MAJOR.MINOR.PATCH
+# (Pak Rat accepts nothing else), following the upstream tag's MAJOR.MINOR, and
+# identical in the package manifest and the packaged build provenance.
+version_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+manifest_version="$(jq -r '.package_version // ""' "$MANIFEST")"
+provenance_version="$(jq -r '.package_version // ""' \
+    "$PACKAGE_DIR/provenance/build-manifest.json")"
+if ! [[ "$manifest_version" =~ $version_re ]]; then
+    echo "manifest package_version is not MAJOR.MINOR.PATCH: '$manifest_version'" >&2
+    exit 1
+fi
+if [ "$manifest_version" != "${FLYCAST_PACKAGE_VERSION:-}" ]; then
+    echo "manifest package_version $manifest_version does not match upstream.env ${FLYCAST_PACKAGE_VERSION:-}" >&2
+    exit 1
+fi
+if [ "$provenance_version" != "$manifest_version" ]; then
+    echo "provenance package_version '$provenance_version' does not match the manifest" >&2
+    exit 1
+fi
+case "$manifest_version" in
+    "${FLYCAST_UPSTREAM_TAG#v}".*) ;;
+    *)
+        echo "package_version $manifest_version does not follow upstream $FLYCAST_UPSTREAM_TAG" >&2
+        exit 1
+        ;;
+esac
+
 config_version="$(tr -d '[:space:]' <"$PACKAGE_DIR/defaults/config.version")"
 manifest_config_version="$(jq -r '.config_schema_version' "$MANIFEST")"
 if [ "$config_version" != "$manifest_config_version" ]; then
@@ -114,5 +141,5 @@ for forbidden in BIOS Roms Saves States userdata flycast.log emu.cfg.save; do
     fi
 done
 
-printf 'Verified Flycast MLP1 package: %s files, binary %s\n' \
-    "$(jq '.files | length' "$MANIFEST")" "$binary_sha"
+printf 'Verified Flycast MLP1 package %s: %s files, binary %s\n' \
+    "$manifest_version" "$(jq '.files | length' "$MANIFEST")" "$binary_sha"
