@@ -176,6 +176,10 @@
       {
         "path": "patches/0005-verify-managed-passwords-directly.patch",
         "sha256": "28a3f794676af76b03a7e4ac78ce56bb86895db8c53caffafccdc2ed93353da1"
+      },
+      {
+        "path": "patches/0006-bound-achievements-teardown.patch",
+        "sha256": "dbadc155570ef2952be55d4d1ad564ee6c1197b53304af5dced2c96b1ff637e9"
       }
     ]
   }

@@ -1,0 +1,186 @@
+diff --git a/core/achievements/achievements.cpp b/core/achievements/achievements.cpp
+--- a/core/achievements/achievements.cpp
++++ b/core/achievements/achievements.cpp
+@@ -154,6 +154,9 @@
+ 	std::string cachePath;
+ 	std::unordered_map<u64, std::string> cacheMap;
+ 	std::mutex cacheMutex;
++	// UMRK: declared before taskThread, which may still run tasks while
++	// it is destroyed.
++	std::atomic_bool cancelRequests {false};
+ 	WorkerThread taskThread {"RA-background"};
+ 
+ 	PeriodicThread idleThread { "RA-idle", [this]() {
+@@ -262,12 +265,22 @@
+ }
+ 
+ void Achievements::asyncTask(std::function<void()>&& f) {
+-	taskThread.run(std::move(f));
++	// UMRK: stopThreads() can abort this task's requests.
++	taskThread.run([this, f = std::move(f)]() {
++		http::CancelScope scope(&cancelRequests);
++		f();
++	});
+ }
+ 
+ void Achievements::stopThreads() {
+-	taskThread.stop();
++	// UMRK: teardown must not wait on the network. In-flight requests fail
++	// through their normal callbacks; follow-up tasks those callbacks queue
++	// are discarded (see WorkerThread::stop()). The idle thread stops first
++	// so it cannot queue new requests behind the drain.
++	cancelRequests = true;
+ 	idleThread.stop();
++	taskThread.stop();
++	cancelRequests = false;
+ }
+ 
+ bool Achievements::init()
+diff --git a/core/oslib/http_client.cpp b/core/oslib/http_client.cpp
+--- a/core/oslib/http_client.cpp
++++ b/core/oslib/http_client.cpp
+@@ -335,6 +335,12 @@
+ 		headers->emplace_back(name, value);
+ 	}
+ 	return nitems;
++}
++
++static int cancelProgress(void *clientp, curl_off_t, curl_off_t, curl_off_t, curl_off_t)
++{
++	// Non-zero aborts the transfer with CURLE_ABORTED_BY_CALLBACK.
++	return ((const std::atomic_bool *)clientp)->load() ? 1 : 0;
+ }
+ 
+ static CURL *makeCurlEasy(const std::string& url)
+@@ -344,6 +350,17 @@
+ 	curl_easy_setopt(curl, CURLOPT_AUTOREFERER, 1);
+ 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1);
+ 	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30);	// default is 300 s so 5 min
++	if (const std::atomic_bool *cancel = CancelScope::current())
++	{
++		curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
++		curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, cancelProgress);
++		curl_easy_setopt(curl, CURLOPT_XFERINFODATA, (void *)cancel);
++		curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
++		curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, CancelScope::StallSeconds);
++		// An aborted name lookup is left to finish in its own thread instead
++		// of being joined: getaddrinfo() cannot be interrupted.
++		curl_easy_setopt(curl, CURLOPT_QUICK_EXIT, 1L);
++	}
+ 
+ 	curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");
+ 
+diff --git a/core/oslib/http_client.h b/core/oslib/http_client.h
+--- a/core/oslib/http_client.h
++++ b/core/oslib/http_client.h
+@@ -23,6 +23,7 @@
+ #include <iomanip>
+ #include <sstream>
+ #include <locale>
++#include <atomic>
+ #include "types.h"
+ #include "version.h"
+ 
+@@ -58,6 +59,34 @@
+ 	return status >= 200 && status < 300;
+ }
+ 
++// UMRK: requests made by this thread while a scope is active stop within
++// about a second once the flag is set, including during a name lookup, and a
++// transfer that makes no progress for StallSeconds fails instead of waiting
++// forever. Other callers keep upstream behavior. Only the curl client
++// implements it.
++class CancelScope
++{
++public:
++	static constexpr long StallSeconds = 30;
++
++	explicit CancelScope(const std::atomic_bool *flag) : previous(current()) {
++		current() = flag;
++	}
++	~CancelScope() {
++		current() = previous;
++	}
++	CancelScope(const CancelScope&) = delete;
++	CancelScope& operator=(const CancelScope&) = delete;
++
++	static const std::atomic_bool *& current() {
++		static thread_local const std::atomic_bool *flag = nullptr;
++		return flag;
++	}
++
++private:
++	const std::atomic_bool *previous;
++};
++
+ static inline std::string urlEncode(const std::string& value)
+ {
+ 	std::ostringstream escaped;
+diff --git a/core/util/worker_thread.h b/core/util/worker_thread.h
+--- a/core/util/worker_thread.h
++++ b/core/util/worker_thread.h
+@@ -24,6 +24,7 @@
+ #include <memory>
+ #include <functional>
+ #include <future>
++#include <condition_variable>
+ 
+ class WorkerThread
+ {
+@@ -36,15 +37,32 @@
+ 		stop();
+ 	}
+ 
++	// UMRK: join without holding the mutex. A running task may still call
++	// run() (an rcheevos callback queueing its follow-up); holding the mutex
++	// here made that call wait for this join, which waited for that task.
++	// A task the stopping thread queues for itself belongs to the work being
++	// stopped: it is not started and the next start() discards it. Other
++	// threads' run() still waits for the stop, then starts a new thread.
+ 	void stop()
+ 	{
+-		std::lock_guard<std::mutex> _(mutex);
+-		if (thread != nullptr && thread->joinable())
++		std::unique_ptr<std::thread> joining;
+ 		{
++			std::unique_lock<std::mutex> lock(mutex);
++			// A concurrent stop() returns only once the thread is gone.
++			stopped.wait(lock, [this]() { return !stopping; });
++			if (thread == nullptr || !thread->joinable())
++				return;
++			stopping = true;
++			stoppingId = thread->get_id();
+ 			queue.push(Exit());
+-			thread->join();
+-			thread.reset();
++			joining = std::move(thread);
+ 		}
++		joining->join();
++		{
++			std::lock_guard<std::mutex> _(mutex);
++			stopping = false;
++		}
++		stopped.notify_all();
+ 	}
+ 
+ 	void run(Function&& task) {
+@@ -68,7 +86,10 @@
+ private:
+ 	void start()
+ 	{
+-		std::lock_guard<std::mutex> _(mutex);
++		std::unique_lock<std::mutex> lock(mutex);
++		if (stopping && std::this_thread::get_id() == stoppingId)
++			return;
++		stopped.wait(lock, [this]() { return !stopping; });
+ 		if (thread != nullptr && thread->joinable())
+ 			return;
+ 		queue.clear();
+@@ -92,4 +113,7 @@
+ 	TsQueue<Task> queue;
+ 	std::unique_ptr<std::thread> thread;
+ 	std::mutex mutex;
++	std::condition_variable stopped;
++	bool stopping = false;
++	std::thread::id stoppingId;
+ };

@@ -73,6 +73,9 @@ echo "route status: shown in the achievements list view"
 # progress/login messages must not erase the mandatory Hardcore-host notice.
 python3 "$ROOT_DIR/tests/achievement-notice-test.py"
 python3 "$ROOT_DIR/tests/ra-session-login-test.py"
+# Teardown must not wait on the network or deadlock on a callback's
+# follow-up task. Compiles the real WorkerThread and curl client (libcurl).
+python3 "$ROOT_DIR/tests/ra-teardown-test.py"
 
 # Request URLs from the pinned rcheevos for the session host. gnu99, not c99:
 # rcheevos uses POSIX strdup/strncasecmp, which strict C99 hides on glibc.
