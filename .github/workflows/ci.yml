@@ -42,6 +42,11 @@ jobs:
       - name: Build lock enforcement
         run: make build-lock-test
 
+      # Host-only: verify-mlp1-binary.sh with a stub adb listing a device must
+      # not touch it unless VERIFY_ON_DEVICE=1.
+      - name: On-device ABI check stays opt-in
+        run: make device-check-optin-test
+
       - name: Build the locked MLP1 payload
         run: make package-mlp1
 

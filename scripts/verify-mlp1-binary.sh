@@ -41,17 +41,34 @@ if [ -f "$ROOT_DIR/output/mlp1/flycast/manifest.json" ]; then
 fi
 python3 "$ROOT_DIR/scripts/check-binary-capabilities.py" "$BINARY" "${record_dirs[@]}"
 
-if command -v adb >/dev/null 2>&1; then
-    if [ -n "${ADB_SERIAL:-}" ]; then
-        serial="$ADB_SERIAL"
-    else
-        serial="$(adb devices | awk 'NR > 1 && $2 == "device" { print $1; exit }')"
-    fi
+# The on-device ABI check writes to and runs on a real device, so it happens
+# only on request: VERIFY_ON_DEVICE=1, against ADB_SERIAL or else the first
+# online device. Without it the script is host-only even when adb is installed
+# and a device is connected.
+case "${VERIFY_ON_DEVICE:-0}" in
+    0 | "") exit 0 ;;
+    1) ;;
+    *)
+        echo "VERIFY_ON_DEVICE must be 0 or 1, not '$VERIFY_ON_DEVICE'" >&2
+        exit 1
+        ;;
+esac
 
-    if [ -n "$serial" ]; then
-        remote=/tmp/umrk-flycast-abi-check
-        adb -s "$serial" push "$BINARY" "$remote" >/dev/null
-        adb -s "$serial" shell "chmod 755 '$remote' && LD_TRACE_LOADED_OBJECTS=1 '$remote'"
-        adb -s "$serial" shell "rm -f '$remote'"
-    fi
+if ! command -v adb >/dev/null 2>&1; then
+    echo "VERIFY_ON_DEVICE=1 but adb is not installed" >&2
+    exit 1
 fi
+if [ -n "${ADB_SERIAL:-}" ]; then
+    serial="$ADB_SERIAL"
+else
+    serial="$(adb devices | awk 'NR > 1 && $2 == "device" { print $1; exit }')"
+fi
+if [ -z "$serial" ]; then
+    echo "VERIFY_ON_DEVICE=1 but no adb device is online" >&2
+    exit 1
+fi
+
+remote=/tmp/umrk-flycast-abi-check
+adb -s "$serial" push "$BINARY" "$remote" >/dev/null
+adb -s "$serial" shell "chmod 755 '$remote' && LD_TRACE_LOADED_OBJECTS=1 '$remote'"
+adb -s "$serial" shell "rm -f '$remote'"
