@@ -51,7 +51,8 @@ chmod 0755 "$PACKAGE_DIR/bin/flycast" "$PACKAGE_DIR/launch.sh"
 
 run_wrapper() {
     bios_path="${1:-$BIOS_PATH_TEST}"
-    env -u UMRK_ENV_FILE \
+    env -u UMRK_ENV_FILE -u LEAF_DISPLAY_OUTPUT -u LEAF_DISPLAY_CONNECTOR \
+        -u LEAF_DISPLAY_MODE -u LEAF_DISPLAY_ASPECT \
         PLATFORM=mlp1 \
         SDCARD_PATH="$SDCARD_PATH_TEST" \
         USERDATA_PATH="$USERDATA_PATH_TEST" \
@@ -507,4 +508,61 @@ fi
 grep -F 'JAWAKA_CHEEVOS_PASSWORD[]=<>' "$LOG_FILE" >/dev/null
 grep -F 'UMRK_FLYCAST_RA_ROUTE=<>' "$LOG_FILE" >/dev/null
 
-printf 'Verified launch wrapper paths, quoting, seed policy, account and route handoff, RetroArch credential scrub, probe override policy, and user-config preservation\n'
+# The screen jawakad reports (LEAF_DISPLAY_*). Unset or panel: the rotation for
+# the portrait panel, and emu.cfg's window. A TV: no rotation, the launcher's
+# TV mode as the window, and Flycast's stretch only when HDMI Output asks.
+run_wrapper_display() {
+    env -u UMRK_ENV_FILE -u LEAF_DISPLAY_CONNECTOR \
+        PLATFORM=mlp1 \
+        SDCARD_PATH="$SDCARD_PATH_TEST" \
+        USERDATA_PATH="$USERDATA_PATH_TEST" \
+        BIOS_PATH="$BIOS_PATH_TEST" \
+        SAVES_PATH="$SAVES_PATH_TEST" \
+        STATES_PATH="$STATES_PATH_TEST" \
+        CHEATS_PATH="$CHEATS_PATH_TEST" \
+        LOGS_PATH="$LOGS_PATH_TEST" \
+        UMRK_RUNTIME_PATH="$RUNTIME_PATH_TEST" \
+        LEAF_DISPLAY_OUTPUT="$1" \
+        LEAF_DISPLAY_MODE="$2" \
+        LEAF_DISPLAY_ASPECT="$3" \
+        "$PACKAGE_DIR/launch.sh" "$ROM_PATH"
+}
+
+assert_display_absent() {
+    if grep -F "$1" "$LOG_FILE" >/dev/null; then
+        echo "launch wrapper: unexpected $1 for this screen" >&2
+        exit 1
+    fi
+}
+
+run_wrapper
+grep -F 'FLYCAST_UI_ROTATE_90=<1>' "$LOG_FILE" >/dev/null
+grep -F 'config:rend.Rotate90=yes' "$LOG_FILE" >/dev/null
+assert_display_absent 'window:width='
+
+run_wrapper_display panel '720x960@60' '4:3'
+grep -F 'FLYCAST_UI_ROTATE_90=<1>' "$LOG_FILE" >/dev/null
+grep -F 'config:rend.Rotate90=yes' "$LOG_FILE" >/dev/null
+assert_display_absent 'window:width='
+assert_display_absent 'config:rend.ScreenStretching='
+
+run_wrapper_display hdmi '1280x720@60' '4:3'
+grep -F 'FLYCAST_UI_ROTATE_90=<>' "$LOG_FILE" >/dev/null
+grep -F 'config:rend.Rotate90=no' "$LOG_FILE" >/dev/null
+grep -F 'window:width=1280,window:height=720' "$LOG_FILE" >/dev/null
+assert_display_absent 'config:rend.Rotate90=yes'
+assert_display_absent 'config:rend.ScreenStretching='
+
+run_wrapper_display hdmi '1920x1080@120' 'stretch'
+grep -F 'window:width=1920,window:height=1080' "$LOG_FILE" >/dev/null
+grep -F 'config:rend.ScreenStretching=134' "$LOG_FILE" >/dev/null
+
+# A mode that is not WxH leaves emu.cfg's window alone; the TV still gets no
+# rotation.
+run_wrapper_display hdmi 'garbage@60' '4:3'
+grep -F 'config:rend.Rotate90=no' "$LOG_FILE" >/dev/null
+assert_display_absent 'window:width='
+run_wrapper_display hdmi '1280x7a0' '4:3'
+assert_display_absent 'window:width='
+
+printf 'Verified launch wrapper paths, quoting, seed policy, account and route handoff, RetroArch credential scrub, probe override policy, user-config preservation, and the panel and TV display handoff\n'

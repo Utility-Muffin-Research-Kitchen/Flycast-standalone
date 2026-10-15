@@ -289,7 +289,33 @@ export SDL_VIDEODRIVER=kmsdrm
 export SDL_KMSDRM_REQUIRE_DRM_MASTER=1
 export SDL_AUDIODRIVER=pulseaudio
 export PULSE_SERVER="${PULSE_SERVER:-unix:/tmp/pulse-socket}"
-export FLYCAST_UI_ROTATE_90=1
+# Leaf says which screen the game is on (LEAF_DISPLAY_*, set by jawakad; unset
+# means the built-in panel). The panel is a portrait part mounted sideways, so
+# the picture and the menus are rotated for it. A TV needs neither, and gets
+# the launcher's TV mode instead of the 640x480 window in emu.cfg: TVs show
+# some PC modes as black.
+DISPLAY_IS_TV=0
+DISPLAY_W=""
+DISPLAY_H=""
+if [ "${LEAF_DISPLAY_OUTPUT:-panel}" = hdmi ]; then
+    DISPLAY_IS_TV=1
+    display_size="${LEAF_DISPLAY_MODE%%@*}"
+    case "$display_size" in
+        *x*)
+            DISPLAY_W="${display_size%%x*}"
+            DISPLAY_H="${display_size#*x}"
+            case "$DISPLAY_W:$DISPLAY_H" in
+                *[!0-9:]*|:*|*:) DISPLAY_W=""; DISPLAY_H="" ;;
+            esac
+            ;;
+    esac
+fi
+if [ "$DISPLAY_IS_TV" = 1 ]; then
+    # The menu patch rotates whenever the variable exists, whatever its value.
+    unset FLYCAST_UI_ROTATE_90
+else
+    export FLYCAST_UI_ROTATE_90=1
+fi
 
 validate_virtual_path() {
     case "$2" in
@@ -321,7 +347,20 @@ append_override "audio:backend=sdl2"
 append_override "config:pvr.rend=0"
 append_override "config:rend.PerStripSorting=yes"
 append_override "config:rend.Resolution=480"
-append_override "config:rend.Rotate90=yes"
+if [ "$DISPLAY_IS_TV" = 1 ]; then
+    append_override "config:rend.Rotate90=no"
+    if [ -n "$DISPLAY_W" ]; then
+        append_override "window:width=$DISPLAY_W"
+        append_override "window:height=$DISPLAY_H"
+    fi
+    # HDMI Output Stretch fills the TV, as it does for the launcher and
+    # RetroArch. In 4:3 the player's own stretch setting stands.
+    if [ "${LEAF_DISPLAY_ASPECT:-4:3}" = stretch ]; then
+        append_override "config:rend.ScreenStretching=134"
+    fi
+else
+    append_override "config:rend.Rotate90=yes"
+fi
 append_override "config:rend.ThreadedRendering=yes"
 append_override "config:rend.vsync=yes"
 append_override "config:Dreamcast.BiosPath=$BIOS_PATH/dc"
